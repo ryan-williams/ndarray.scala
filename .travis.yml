@@ -12,6 +12,7 @@ before_install:
 - ./.travis/setup.sh
 
 script:
+- echo $AWS_ACCESS_KEY_ID
 - sbt ++$TRAVIS_SCALA_VERSION clean coverageTest
 
 cache:
