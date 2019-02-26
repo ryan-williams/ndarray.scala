@@ -126,6 +126,16 @@ lazy val convert =
       zarr.jvm andTest
     )
 
+lazy val hdf5 =
+  cross
+    .settings(
+      dep(
+        files,
+        types,
+      )
+    )
+lazy val `hdf5-x` = hdf5.x
+
 lazy val ndarray =
   cross
     .settings(
@@ -334,6 +344,7 @@ lazy val all =
     `circe-utils-x` ,
           `cloud-x` ,
          convert    ,
+           `hdf5-x` ,
         `ndarray-x` ,
           netcdf    ,
       singlecell    ,
