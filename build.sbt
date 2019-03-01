@@ -130,9 +130,12 @@ lazy val hdf5 =
   cross
     .settings(
       dep(
+        cats,
         files,
         types,
-      )
+      ),
+      kindProjector,
+      partialUnification
     )
 lazy val `hdf5-x` = hdf5.x
 
