@@ -1,14 +1,15 @@
 package org.lasersonlab.hdf5
 
 import java.net.URI
-import java.nio.ByteBuffer
 
 import cats.implicits._
+import hammerlab.either._
 import org.lasersonlab.files.Uri
 import org.lasersonlab.hdf5.io.Buffer
-import org.lasersonlab.hdf5.io.Buffer.{ MonadErr, syntax }
+import org.lasersonlab.hdf5.io.Buffer.{ EOFException, MonadErr, syntax }
 
 import scala.concurrent.{ ExecutionContext, Future }
+import Array.fill
 
 sealed trait Header {
   def base: Long
@@ -19,16 +20,13 @@ object Header {
   case class V0(
     base: Long,
      eof: Long,
-    root: SymbolTable
+    root: SymbolTable.Entry
   )
   extends Header
   object V0 {
     def apply[F[+_]: MonadErr](implicit b: Buffer[F]): F[V0] = {
       val s = syntax(b); import s._
-
       for {
-        _ ← expect("magic", magic)
-        _ ← zero("superblock")
         _ ← zero("free space")
         _ ← zero("root group")
         _ ← zero("reserved")
@@ -43,7 +41,7 @@ object Header {
         _ ← undefined("file free space info")
         eof ← offset("end of file")
         _ ← undefined("driver information")
-        root ← SymbolTable[F]()
+        root ← SymbolTable.Entry[F]()
       } yield
         V0(
           base,
@@ -62,39 +60,36 @@ object Header {
 
   case class SuperblockMagicNotFound(uri: URI) extends ParseException
 
-  def apply(file: Uri)(implicit ec: ExecutionContext): Unit = {
-    file
-      .size
-      .map {
-        size ⇒
-          lazy val offsets: Stream[Long] = 512L #:: offsets.map{ _ * 2 }
+  def apply(file: Uri)(implicit ec: ExecutionContext): Future[Header] =
+    for {
+      b ← Buffer(file)
+      header ← apply()(MonadErr[Future], b)
+    } yield
+      header
 
-          def superblock(offset: Long = 0): Future[Long] =
-            if (offset + magic.length >= size)
-              Future.failed {
-                SuperblockMagicNotFound(file.uri)
-              }
-            else
-              file
-                .bytes(offset, magic.length)
-                .flatMap {
-                  case bytes if bytes.sameElements(magic) ⇒ Future { offset }
-                  case _ ⇒
-                    superblock {
-                      if (offset == 0)
-                        512
-                      else
-                        offset * 2
-                    }
-                }
-          for {
-            offset ← superblock()
-            bytes ← file.bytes(offset, MAX_HEADER_SIZE)
-            buffer = ByteBuffer.wrap(bytes, magic.length, MAX_HEADER_SIZE - magic.length)
-          } {
+  def apply[F[+_]: MonadErr]()(implicit b: Buffer[F]): F[Header] = {
+    val s = syntax(b); import s._
 
-          }
-
+    def superblock(offset: Long = 0): F[Long] = {
+      for {
+        _ ← b.seek(offset)
+        _ ← expect("magic", magic)
+      } yield
+        offset
+    }
+    .recoverWith {
+      case e: EOFException ⇒ e.raiseError[F, Long]
+      case e ⇒ superblock {
+        if (offset == 0) 512
+        else 2 * offset
       }
+    }
+
+    for {
+      offset ← superblock()
+      _ ← zero("superblock")
+      superblock ← V0[F]
+    } yield
+      superblock
   }
 }

@@ -135,7 +135,11 @@ lazy val hdf5 =
         types,
       ),
       kindProjector,
-      partialUnification
+      partialUnification,
+      utest
+    )
+    .dependsOn(
+      testing forTests
     )
 lazy val `hdf5-x` = hdf5.x
 

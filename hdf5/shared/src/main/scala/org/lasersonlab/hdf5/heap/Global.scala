@@ -54,9 +54,7 @@ object Global {
         size ← length("size")
         size ← F.rethrow { size.safeInt.pure[F] }
         data = bytes("data", size)
-        _ = {
-          bytes("data padding", (8 - size % 8) % 8)
-        }
+        _ = bytes("data padding", (8 - size % 8) % 8)
       } yield
         Object(id, refCount, size, data)
     }

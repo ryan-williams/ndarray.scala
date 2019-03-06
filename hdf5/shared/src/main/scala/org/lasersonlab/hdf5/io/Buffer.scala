@@ -1,21 +1,25 @@
 package org.lasersonlab.hdf5.io
 
-import java.nio.ByteBuffer
+import java.nio.{ ByteBuffer, ByteOrder }
+import ByteOrder.LITTLE_ENDIAN
+import ByteBuffer.wrap
 
 import cats.implicits._
 import cats.{ Monad, MonadError }
 import hammerlab.collection._
 import hammerlab.either._
 import hammerlab.option._
+import org.lasersonlab.files.Uri
 import org.lasersonlab.hdf5.io.Buffer.{ EOFException, MonadErr }
 import org.lasersonlab.hdf5.{ Addr, Length }
 
 import scala.Array.fill
+import scala.concurrent.{ ExecutionContext, Future }
 import scala.math.min
 
 case class Buffer[F[+_]: MonadErr](fetch: Long ⇒ F[ByteBuffer]) {
 
-  private val F = MonadError[F, Exception]
+  private val F = MonadErr[F]
   import F.rethrow
 
   private var range: F[(Long, ByteBuffer, Long)] = range(0)
@@ -41,7 +45,7 @@ case class Buffer[F[+_]: MonadErr](fetch: Long ⇒ F[ByteBuffer]) {
     } yield
       ()
 
-  private def slice(start: Addr, length: Length): Buffer[F] =
+  def slice(start: Addr, length: Length): Buffer[F] =
     Buffer {
       pos ⇒
         val end = start + length
@@ -52,7 +56,7 @@ case class Buffer[F[+_]: MonadErr](fetch: Long ⇒ F[ByteBuffer]) {
           else
             fetch(start + pos).map {
               b ⇒
-                val dupe = b.duplicate()
+                val dupe = b.duplicate().order(b.order)  // JDK-4715166 😱
                 if (pos + dupe.remaining() > length)
                   dupe.limit((length - pos) toInt)
 
@@ -90,18 +94,19 @@ case class Buffer[F[+_]: MonadErr](fetch: Long ⇒ F[ByteBuffer]) {
         if (b.remaining() >= bytes)
           fn(b).pure[F]
         else
-          get(bytes, fn, fill(bytes)(0 toByte))
+          get(bytes, fn, fill(bytes)(0 toByte), order = b.order(), offset = 0)
     }
 
   private def get[T](
     bytes: Int,
     fn: ByteBuffer ⇒ T,
     arr: Array[Byte],
-    offset: Int = 0
+    order: ByteOrder,
+    offset: Int
   ):
     F[T] =
     if (bytes == 0)
-      fn(ByteBuffer.wrap(arr)).pure[F]
+      fn(wrap(arr).order(order)).pure[F]
     else
       for {
         b ← buf
@@ -110,14 +115,14 @@ case class Buffer[F[+_]: MonadErr](fetch: Long ⇒ F[ByteBuffer]) {
           if (remaining == 0) {
             for {
               _ ← advance()
-              res ← buf >>= { b ⇒ get(bytes, fn, arr, offset) }
+              res ← buf >>= { b ⇒ get(bytes, fn, arr, order, offset) }
             } yield
               res
           } else {
             val toRead = min(bytes, remaining)
             b.get(arr, offset, toRead)
             val left = bytes - toRead
-            get(bytes - toRead, fn, arr, offset + toRead)
+            get(bytes - toRead, fn, arr, order, offset + toRead)
           }
       } yield
         res
@@ -134,11 +139,13 @@ case class Buffer[F[+_]: MonadErr](fetch: Long ⇒ F[ByteBuffer]) {
   def getLong : F[ Long] = get(8, _.getLong)
   def getLong[T](fn: (Long, Long) ⇒ T) : F[T] = position.map2(getLong) { fn }
 
-  def get(arr: Array[Byte]): F[Array[Byte]] =
+  def get(arr: Array[Byte], order: ByteOrder = LITTLE_ENDIAN): F[Array[Byte]] =
     get(
       arr.length,
       _ ⇒ arr,
       arr,
+      order,
+      offset = 0
     )
 
   def burn(length: Int): F[Unit] = get(fill(length)(0 toByte)).map { _ ⇒ () }
@@ -150,9 +157,28 @@ case class Buffer[F[+_]: MonadErr](fetch: Long ⇒ F[ByteBuffer]) {
 }
 
 object Buffer {
-  case class UnsupportedValue[T](name: String, value: T, pos: Long) extends Exception
+  case class UnsupportedValue[T](name: String, value: T, pos: Long) extends Exception(s"$name: $value at pos $pos")
 
-  type MonadErr[F[_]] = MonadError[F, Exception]
+  def apply(file: Uri, littleEndian: Boolean = true)(implicit ec: ExecutionContext): Future[Buffer[Future]] =
+    for {
+      size ← file.size
+    } yield
+      Buffer[Future] {
+        pos ⇒
+          import file.blockSize
+          val start = pos / blockSize * blockSize
+          file.bytes(start, blockSize).map {
+            bytes ⇒
+              val buff = wrap(bytes)
+              if (littleEndian)
+                buff.order(ByteOrder.LITTLE_ENDIAN)
+              else
+                buff
+          }
+      }
+      .slice(0, size)
+
+  type MonadErr[F[_]] = MonadError[F, Throwable]
   object MonadErr {
     def apply[F[_]](implicit F: MonadErr[F]) = F
   }
@@ -191,7 +217,7 @@ object Buffer {
       rethrow {
         buf.get {
           (pos, byte) ⇒
-            if (byte != 0)
+            if (byte != value)
               L(UnsupportedValue(name, byte, pos))
             else
               R(())
@@ -215,7 +241,7 @@ object Buffer {
       if (num == 0) ().pure[F]
       else
         for {
-          _ ← zero(name)
+          _ ← expect(name, value)
           rest ← expect(name, value, num - 1)
         } yield
           rest
