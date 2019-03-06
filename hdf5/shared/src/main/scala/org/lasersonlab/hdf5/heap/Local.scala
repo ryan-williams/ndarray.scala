@@ -2,7 +2,7 @@ package org.lasersonlab.hdf5.heap
 
 import cats.implicits._
 import org.lasersonlab.hdf5.io.Buffer
-import org.lasersonlab.hdf5.io.Buffer.{ MonadErr, UnsupportedValue, syntax }
+import org.lasersonlab.hdf5.io.Buffer.{ MonadErr, syntax }
 import org.lasersonlab.hdf5.{ Addr, Length }
 
 case class Local(

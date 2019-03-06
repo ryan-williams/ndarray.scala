@@ -20,22 +20,13 @@ object Global {
       size ← length("size")
       pos ← b.position
       end = start + size
-      objects ← b.consume(end - pos) {
-        implicit b ⇒ objects[F]()
+      objects ← b.takeUntil(end - pos) {
+        implicit b ⇒ Object[F]()
       }
     } yield {
       Global(objects)
     }
   }
-
-  def objects[F[+_]: MonadErr : Buffer](objects: Vector[Object] = Vector()): F[Vector[Object]] =
-    Object[F]().>>= {
-      obj ⇒
-        this.objects[F](objects :+ obj)
-    }
-    .recover {
-      case e: EOFException ⇒ objects
-    }
 
   case class Object(
     id: Int,
@@ -53,8 +44,8 @@ object Global {
         _ ← expect("reserved", Array[Byte](0, 0, 0, 0))
         size ← length("size")
         size ← F.rethrow { size.safeInt.pure[F] }
-        data = bytes("data", size)
-        _ = bytes("data padding", (8 - size % 8) % 8)
+        data ← bytes("data", size)
+        _ ← bytes("data padding", (8 - size % 8) % 8)
       } yield
         Object(id, refCount, size, data)
     }

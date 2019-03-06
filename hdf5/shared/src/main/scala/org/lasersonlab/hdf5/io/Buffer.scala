@@ -88,6 +88,21 @@ case class Buffer[F[+_]: MonadErr](fetch: Long ⇒ F[ByteBuffer]) {
       t
   }
 
+  def takeUntil[T](length: Length)(fn: Buffer[F] ⇒ F[T]): F[Vector[T]] =
+    consume(length) {
+      _.take(fn)
+    }
+
+  def take[T](fn: Buffer[F] ⇒ F[T]): F[Vector[T]] = take(fn, Vector())
+  private def take[T](fn: Buffer[F] ⇒ F[T], elems: Vector[T]): F[Vector[T]] =
+    fn(this).>>= {
+      elem ⇒
+        take(fn, elems :+ elem)
+    }
+    .recover {
+      case e: EOFException ⇒ elems
+    }
+
   private def get[T](bytes: Int, fn: ByteBuffer ⇒ T): F[T] =
     buf >>= {
       b ⇒
@@ -258,6 +273,8 @@ object Buffer {
             short
       }
 
+    def byte(): F[Byte] = buf.get
+
     def unsignedByte(): F[Short] =
       buf.get.map {
         byte ⇒
@@ -276,47 +293,56 @@ object Buffer {
             int
       }
 
+    def signedInt(name: String): F[Int] =
+      rethrow {
+        buf.getInt.>>= {
+          int ⇒
+            if (int < 0)
+              buf.position.map { pos ⇒ L(UnsupportedValue(name, int, pos)) }
+            else
+              R(int).pure[F]
+        }
+      }
+
     def unsignedLong(name: String): F[Long] =
       for {
         pos ← buf.position
         long ← buf.getLong
-        res ← {
+        res ←
           if (long < 0)
             raiseError { UnsupportedValue(name, long, pos) }
           else
             long.pure[F]
-        }
       } yield
         res
 
-    def unsignedLongs(name: String): F[List[Long]] = unsignedLongs(name, buf.position)
-    def unsignedLongs(name: String, pos: F[Long], longs: F[List[Long]] = List[Long]().pure[F]): F[List[Long]] =
-      buf.getLong >>= {
-        next ⇒
-          if (next < 0)
-            pos >>= {
-              pos ⇒
-                raiseError {
-                  UnsupportedValue(name, next, pos)
-                }
-            }
+    def unsignedLongs(name: String, num: Int): F[Vector[Long]] = unsignedLongs(name, num, Vector())
+    private def unsignedLongs(name: String, num: Int, longs: Vector[Long]): F[Vector[Long]] =
+      if (num == 0)
+        longs.pure[F]
+      else
+        for {
+          long ← unsignedLong(name)
+          longs ← unsignedLongs(name, num - 1, longs :+ long)
+        } yield
+          longs
+
+    def unsignedLongs(name: String): F[Vector[Long]] = unsignedLongs(name, buf.position)
+    def unsignedLongs(name: String, pos: F[Long], longs: Vector[Long] = Vector[Long]()): F[Vector[Long]] =
+      for {
+        long ← unsignedLong(name)
+        longs ←
+          if (long == 0)
+            longs.pure[F]
           else
-            longs.map {
-              longs ⇒
-                if (next == 0)
-                  longs
-                else
-                  next :: longs
-            }
-      }
+            unsignedLongs(name, pos, longs :+ long)
+      } yield
+        longs
 
     def undefined(name: String) = expect(name, 0xff toByte, 8)
 
-    def bytes(name: String, size: Int): Array[Byte] = {
-      val arr = fill[Byte](size)(0)
-      buf.get(arr)
-      arr
-    }
+    def bytes(name: String, size: Int): F[Array[Byte]] =
+      buf.get(fill(size)(0 toByte))
   }
 
   case class EOFException(start: Long, end: Long, pos: Long) extends Exception
