@@ -1,33 +1,32 @@
 package org.lasersonlab.hdf5.btree
 
 import cats.implicits._
-import hammerlab.either._
 import hammerlab.collection._
 import hammerlab.option._
 import org.lasersonlab.hdf5.btree.V1.Node.{ Data, Group }
 import org.lasersonlab.hdf5.{ Addr, Mask, UInt }
 import org.lasersonlab.hdf5.io.Buffer
-import org.lasersonlab.hdf5.io.Buffer.UnsupportedValue
+import org.lasersonlab.hdf5.io.Buffer.{ MonadErr, UnsupportedValue, syntax }
 
 object V1 {
   val MAGIC = Array[Byte]('T', 'R', 'E', 'E')
-  def apply(K: Int)(implicit b: Buffer) = {
-    import b._
+  def apply[F[+_]: MonadErr](K: Int)(implicit b: Buffer[F]): F[Unit] = {
+    val s = syntax(b); import s._
     for {
       _ ← expect("magic", MAGIC)
-      tpe ← Type()
-      level = unsignedByte()
-      numEntries = unsignedShort()
+      tpe ← Type[F]()
+      level ← unsignedByte()
+      numEntries ← unsignedShort()
        left ← offset_?( "left sibling")
       right ← offset_?("right sibling")
       node ← {
         tpe match {
           case Type.`0` ⇒
-            Group.children(K).map {
+            Group.children[F](K).map {
               Group(level, numEntries, left, right, _)
             }
           case Type.`1` ⇒
-            Data.children(K).map {
+            Data.children[F](K).map {
               Data(level, numEntries, left, right, _)
             }
         }
@@ -41,12 +40,18 @@ object V1 {
     case object `0` extends Type
     case object `1` extends Type
 
-    def apply()(implicit buf: Buffer) = {
-      buf.buf.get() match {
-        case 0 ⇒ R(`0`)
-        case 1 ⇒ R(`1`)
-        case n ⇒ L(UnsupportedValue("btree node type", n, buf.position() - 1))
-      }
+    def apply[F[+_]: MonadErr]()(implicit b: Buffer[F]): F[Type] = {
+      for {
+        pos ← b.position
+        byte ← b.get
+        res ←
+          byte match {
+            case 0 ⇒ `0`.pure[F]
+            case 1 ⇒ `1`.pure[F]
+            case n ⇒ UnsupportedValue("btree node type", n, pos).raiseError[F, Type]
+          }
+      } yield
+        res
     }
   }
 
@@ -67,8 +72,8 @@ object V1 {
       )
       case class Key(address: Addr)
 
-      def children(K: Int)(implicit b: Buffer): UnsupportedValue[Long] | Seq[Entry] = {
-        import b._
+      def children[F[+_]: MonadErr](K: Int)(implicit b: Buffer[F]): F[Seq[Entry]] = {
+        val s = syntax(b); import s._
         for {
           _ ← length("unused group key 0")
           children ←
@@ -105,15 +110,15 @@ object V1 {
         mask: Mask,
         idxs: Seq[Long]
       )
-      def children(K: Int)(implicit b: Buffer): UnsupportedValue[_] | Seq[Entry] = {
-        import b._
+      def children[F[+_]: MonadErr](K: Int)(implicit b: Buffer[F]): F[Seq[Entry]] = {
+        val s = syntax(b); import s._
         for {
           children ←
             {
               for { i ← 0 until K toList } yield {
-                val size = unsignedInt()
-                val mask = Mask()
                 for {
+                  size ← unsignedInt()
+                  mask ← Mask[F]
                   idxs ← unsignedLongs(s"data child $i idx")
                   key = Key(size, mask, idxs)
                   child ← offset(s"data child $i ptr")

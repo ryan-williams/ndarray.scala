@@ -1,16 +1,16 @@
 package org.lasersonlab.hdf5
 
-import hammerlab.either._
+import cats.implicits._
 import org.lasersonlab.hdf5.io.Buffer
-import org.lasersonlab.hdf5.io.Buffer.UnsupportedValue
+import org.lasersonlab.hdf5.io.Buffer.{ MonadErr, syntax }
 
 case class ScratchPad(
   btree: Long,
   nameHeap: Long
 )
 object ScratchPad {
-  def apply()(implicit buffer: Buffer): UnsupportedValue[Long] | ScratchPad = {
-    import buffer._
+  def apply[F[+_]: MonadErr]()(implicit b: Buffer[F]): F[ScratchPad] = {
+    val s = syntax(b); import s._
     for {
       btree ← offset("btree")
       nameHeap ← offset("nameHeap")

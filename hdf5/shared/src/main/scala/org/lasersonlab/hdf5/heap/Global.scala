@@ -2,40 +2,40 @@ package org.lasersonlab.hdf5.heap
 
 import cats.implicits._
 import hammerlab.collection._
-import hammerlab.either._
 import hammerlab.math.utils._
-import org.lasersonlab.hdf5.{ Addr, Length }
+import org.lasersonlab.hdf5.heap.Global.Object
 import org.lasersonlab.hdf5.io.Buffer
-import org.lasersonlab.hdf5.io.Buffer.UnsupportedValue
-import Global.Object
+import org.lasersonlab.hdf5.io.Buffer.{ EOFException, MonadErr, syntax }
+import org.lasersonlab.hdf5.{ Addr, Length }
 
 case class Global(objects: Vector[Object])
 object Global {
-  def apply()(implicit b: Buffer) = {
-    import b._
-    val start = b.position()
+  def apply[F[+_]: MonadErr]()(implicit b: Buffer[F]): F[Global] = {
+    val s = syntax(b); import s._
     for {
+      start ← b.position
       _ ← expect("magic", Array[Byte]('G', 'C', 'O', 'L'))
       _ ← expect("version", 1 toByte)
       _ ← expect("reserved", Array[Byte](0, 0, 0))
       size ← length("size")
+      pos ← b.position
       end = start + size
-      _ = b.buf.limit()
-      objects ←
-        b.position().unfoldLeft {
-          pos ⇒
-            if (pos < end) {
-              Some((Object(), b.position()))
-            } else
-              None
-        }
-        .sequence
-        .map { _.toVector }
+      objects ← b.consume(end - pos) {
+        implicit b ⇒ objects[F]()
+      }
     } yield {
-      b.buf.position(end)
       Global(objects)
     }
   }
+
+  def objects[F[+_]: MonadErr : Buffer](objects: Vector[Object] = Vector()): F[Vector[Object]] =
+    Object[F]().>>= {
+      obj ⇒
+        this.objects[F](objects :+ obj)
+    }
+    .recover {
+      case e: EOFException ⇒ objects
+    }
 
   case class Object(
     id: Int,
@@ -44,14 +44,15 @@ object Global {
     data: Array[Byte]
   )
   object Object {
-    def apply()(implicit b: Buffer): Exception | Object = {
-      import b._
-      val id = unsignedShort()
-      val refCount = unsignedShort()
+    def apply[F[+_]: MonadErr]()(implicit b: Buffer[F]): F[Object] = {
+      val s = syntax(b); import s._
+      val F = MonadErr[F]
       for {
+        id ← unsignedShort()
+        refCount ← unsignedShort()
         _ ← expect("reserved", Array[Byte](0, 0, 0, 0))
         size ← length("size")
-        size ← size.safeInt
+        size ← F.rethrow { size.safeInt.pure[F] }
         data = bytes("data", size)
         _ = {
           bytes("data padding", (8 - size % 8) % 8)
@@ -63,11 +64,11 @@ object Global {
 
   case class ID(heap: Addr, idx: Long)
   object ID {
-    def apply()(implicit b: Buffer): UnsupportedValue[Long] | ID = {
-      import b._
+    def apply[F[+_]: MonadErr]()(implicit b: Buffer[F]): F[ID] = {
+      val s = syntax(b); import s._
       for {
         heap ← offset("heap")
-        idx = unsignedInt()
+        idx ← unsignedInt()
       } yield
         ID(heap, idx)
     }

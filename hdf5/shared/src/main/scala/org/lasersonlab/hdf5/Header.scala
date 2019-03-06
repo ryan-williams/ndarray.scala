@@ -3,9 +3,10 @@ package org.lasersonlab.hdf5
 import java.net.URI
 import java.nio.ByteBuffer
 
-import hammerlab.either._
+import cats.implicits._
 import org.lasersonlab.files.Uri
 import org.lasersonlab.hdf5.io.Buffer
+import org.lasersonlab.hdf5.io.Buffer.{ MonadErr, syntax }
 
 import scala.concurrent.{ ExecutionContext, Future }
 
@@ -22,8 +23,8 @@ object Header {
   )
   extends Header
   object V0 {
-    def apply(implicit buffer: Buffer): Exception | V0 = {
-      import buffer._
+    def apply[F[+_]: MonadErr](implicit b: Buffer[F]): F[V0] = {
+      val s = syntax(b); import s._
 
       for {
         _ ← expect("magic", magic)
@@ -35,14 +36,14 @@ object Header {
         _ ← expect("offset size", 8 toByte)
         _ ← expect("length size", 8 toByte)
         _ ← zero("reserved")
-        groupLeafK = unsignedShort()
-        groupInternalK = unsignedShort()
+        groupLeafK ← unsignedShort()
+        groupInternalK ← unsignedShort()
         _ ← expect("file consistency flags", 0, 4)
         base ← offset("base address")
         _ ← undefined("file free space info")
         eof ← offset("end of file")
         _ ← undefined("driver information")
-        root ← SymbolTable()
+        root ← SymbolTable[F]()
       } yield
         V0(
           base,
@@ -86,7 +87,6 @@ object Header {
                         offset * 2
                     }
                 }
-
           for {
             offset ← superblock()
             bytes ← file.bytes(offset, MAX_HEADER_SIZE)
