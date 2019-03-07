@@ -93,6 +93,15 @@ case class Buffer[F[+_]: MonadErr](fetch: Long ⇒ F[ByteBuffer]) {
       _.take(fn)
     }
 
+  def takeN[T](num: Int)(fn: Buffer[F] ⇒ F[T]): F[Vector[T]] = takeN(fn, num, Vector())
+  def takeN[T](fn: Buffer[F] ⇒ F[T], num: Int, elems: Vector[T]): F[Vector[T]] =
+    if (num == 0)
+      elems.pure[F]
+    else
+      fn(this).>>= {
+        elem ⇒ takeN(fn, num - 1, elems :+ elem)
+      }
+
   def take[T](fn: Buffer[F] ⇒ F[T]): F[Vector[T]] = take(fn, Vector())
   private def take[T](fn: Buffer[F] ⇒ F[T], elems: Vector[T]): F[Vector[T]] =
     fn(this).>>= {
@@ -163,6 +172,12 @@ case class Buffer[F[+_]: MonadErr](fetch: Long ⇒ F[ByteBuffer]) {
       offset = 0
     )
 
+  def getN[T](n: Int, arr: Array[Byte], fn: ByteBuffer ⇒ T, order: ByteOrder = LITTLE_ENDIAN): F[T] =
+    get(n, _ ⇒ arr, arr, order, offset = 0).map {
+      arr ⇒
+        fn(wrap(arr).order(order))
+    }
+
   def burn(length: Int): F[Unit] = get(fill(length)(0 toByte)).map { _ ⇒ () }
 
   def get[T](arr: Array[Byte], fn: (Long, Array[Byte]) ⇒ T): F[T] =
@@ -199,22 +214,25 @@ object Buffer {
   }
 
   case class syntax[F[+_]](buf: Buffer[F])(implicit F: MonadErr[F]) {
-    import F.{ rethrow, raiseError }
+    import F.rethrow
 
     def offset(name: String): F[  Addr] = unsignedLong(name)
     def length(name: String): F[Length] = unsignedLong(name)
 
     def offset_?(name: String): F[?[Addr]] =
-      rethrow {
-        buf.getLong {
-          (position, long) ⇒
-            if (long == -1)
-              R(None)
-            else if (long < 0)
-              L(UnsupportedValue(name, long, position - 8))
-            else
-              R(Some(long))
-        }
+      buf.getLong.>>= {
+        long ⇒
+          if (long < 0)
+            err[Long, ?[Long]](name, long, 8)
+          else {
+            (
+              if (long == -1)
+                None
+              else
+                Some(long)
+            )
+            .pure[F]
+          }
       }
 
     def int(name: String, expected: Int) =
@@ -275,6 +293,20 @@ object Buffer {
 
     def byte(): F[Byte] = buf.get
 
+    def err[V, T](name: String, value: V, offset: Int = 0): F[T] =
+      buf.position.>>= {
+        pos ⇒
+          UnsupportedValue(name, value, pos - offset)
+            .raiseError[F, T]
+      }
+
+    def bool(name: String): F[Boolean] =
+      buf.get.>>= {
+        case 0 ⇒ false.pure[F]
+        case 1 ⇒  true.pure[F]
+        case n ⇒ err(name, n, 1)
+      }
+
     def unsignedByte(): F[Short] =
       buf.get.map {
         byte ⇒
@@ -294,23 +326,20 @@ object Buffer {
       }
 
     def signedInt(name: String): F[Int] =
-      rethrow {
-        buf.getInt.>>= {
-          int ⇒
-            if (int < 0)
-              buf.position.map { pos ⇒ L(UnsupportedValue(name, int, pos)) }
-            else
-              R(int).pure[F]
-        }
+      buf.getInt >>= {
+        int ⇒
+          if (int < 0)
+            err(name, int, 4)
+          else
+            int.pure[F]
       }
 
     def unsignedLong(name: String): F[Long] =
       for {
-        pos ← buf.position
         long ← buf.getLong
         res ←
           if (long < 0)
-            raiseError { UnsupportedValue(name, long, pos) }
+            err(name, long, 8)
           else
             long.pure[F]
       } yield
