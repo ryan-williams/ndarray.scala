@@ -2,6 +2,8 @@ package org.lasersonlab.hdf5.btree
 
 import cats.implicits._
 import hammerlab.option._
+import org.lasersonlab.hdf5.btree.V2.Node.Internal.Child
+import org.lasersonlab.hdf5.btree.V2.Node.{ Internal, Leaf }
 import org.lasersonlab.hdf5.heap.Fractal
 import org.lasersonlab.hdf5.{ Addr, Length, Mask }
 import org.lasersonlab.hdf5.io.Buffer
@@ -11,8 +13,32 @@ import Array.fill
 
 object V2 {
 
+  def byteSize(n: Long, check: Int = 1): Int =
+    if (check == 8) 8
+    else if ((n >> (check * 8)) > 0) byteSize(n, check + 1)
+    else check
+
+  case class MaxChildRecords(children: Int, descendents: Long, tail: ?[MaxChildRecords])
+  object MaxChildRecords {
+    def apply(depth: Int, nodeSize: Int, recordSize: Int): MaxChildRecords =
+      depth match {
+        case 1 ⇒ MaxChildRecords((nodeSize - 10) / recordSize, (nodeSize - 10) / recordSize, None)
+        case 2 ⇒
+          val leafMaxs @ MaxChildRecords(maxLeafRecords, _, None) = apply(depth - 1, nodeSize, recordSize)
+          val maxChildren = (nodeSize - 10 - recordSize) / (recordSize + 8 + byteSize(maxLeafRecords))
+          val maxDescendents = maxChildren.toLong * maxLeafRecords
+          MaxChildRecords(maxChildren, maxDescendents, Some(leafMaxs))
+        case _ ⇒
+          val childMaxs @ MaxChildRecords(maxChildRecords, maxChildDescendents, _) = apply(depth - 1, nodeSize, recordSize)
+          val maxChildren = (nodeSize - 10 - recordSize) / (recordSize + 8 + byteSize(maxChildRecords) + byteSize(maxChildDescendents))
+          val maxDescendents = maxChildRecords.toLong * maxChildDescendents
+          MaxChildRecords(maxChildRecords, maxDescendents, Some(childMaxs))
+      }
+  }
+
   case class Header(
     tpe: Type,
+    nodeSize: Int,
     recordSize: Int,
     depth: Int,
     splitPercent: Byte,
@@ -20,7 +46,13 @@ object V2 {
     rootAddr: Addr,
     numRootRecords: Int,
     totalRecords: Length,
-  )
+  ) {
+    def root[F[+_]: MonadErr](implicit b: Buffer[F]): F[Node] =
+      depth match {
+        case 0 ⇒ Leaf[F](tpe, numRootRecords)
+        case _ ⇒ Internal[F](tpe, depth, numRootRecords, MaxChildRecords(depth, nodeSize, recordSize))
+      }
+  }
   object Header {
     def apply[F[+_]: MonadErr](implicit b: Buffer[F]): F[Header] = {
       val s = syntax(b); import s._
@@ -30,7 +62,7 @@ object V2 {
         _ ← zero("version")
         typeByte ← byte()
         tpe ← Type[F](typeByte, pos)
-        size ← unsignedInt()
+        nodeSize ← signedInt("node size")  //
         recordSize ← unsignedShort()
         depth ← unsignedShort()
         splitPercent ← byte()
@@ -42,6 +74,7 @@ object V2 {
       } yield
         Header(
           tpe,
+          nodeSize,
           recordSize,
           depth,
           splitPercent,
@@ -256,8 +289,14 @@ object V2 {
     }
   }
 
+  sealed trait Node
   object Node {
-    case class Internal()
+
+    case class Internal(
+      children: Vector[Child]
+    )
+    extends Node
+
     object Internal {
       case class Child(
         addr: Addr,
@@ -284,33 +323,41 @@ object V2 {
         }
       }
 
-      def apply[F[+_]: MonadErr](tpe: Type, N: Int)(implicit b: Buffer[F]): F[Internal] = {
+      def apply[F[+_]: MonadErr](
+        tpe: Type,
+        depth: Int,
+        numRecords: Int,
+        maxs: MaxChildRecords
+      )(
+        implicit
+        b: Buffer[F]
+      ):
+        F[Internal] = {
         val s = syntax(b); import s._
         for {
           _ ← expect("signature", Array[Byte]('B', 'T', 'I', 'N'))
           _ ← zero("version")
           _ ← expect("type", tpe.byte)
-          records ← b.takeN(N) { implicit b ⇒ tpe[F] }
-          children = ???
+          records ← b.takeN(numRecords + 1) { implicit b ⇒ tpe[F] }
+          children ← b.takeN(numRecords) { implicit b ⇒ Child[F](depth, byteSize(maxs.children), byteSize(maxs.descendents)) }
           checksum = ???
         } yield
-          ???
+          Internal(children)
       }
     }
 
-    case class Leaf[Record <: Type.Record](tpe: Type.Aux[Record], records: Vector[Record])
+    case class Leaf[R <: Type.Record](tpe: Type.Aux[R], records: Vector[R]) extends Node
     object Leaf {
       def apply[F[+_]: MonadErr](tpe: Type, N: Int)(implicit b: Buffer[F]): F[Leaf[tpe.Record]] = {
         val s = syntax(b); import s._
         for {
-          pos ← b.position
           _ ← expect("signature", Array[Byte]('B', 'T', 'L', 'F'))
           _ ← zero("version")
           _ ← expect("type", tpe.byte)
           records ← b.takeN(N) { implicit b ⇒ tpe[F] }
           checksum = ???
         } yield
-          ???
+          Leaf(tpe, records)
       }
     }
   }
