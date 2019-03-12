@@ -24,7 +24,7 @@ object Header {
         numMsgs ← unsignedShort()
         refCount ← signedInt("refCount")
         size ← unsignedInt()
-        msgs ← b.takeUntil(size) {
+        msgs ← b.takeBytes(size) {
           implicit b ⇒ Msg[F]
         }
       } yield
@@ -87,7 +87,7 @@ object Header {
             case 2 ⇒ unsignedInt()
             case 3 ⇒ unsignedLong("size")
           }
-        msgs ← b.takeUntil(size) {
+        msgs ← b.takeBytes(size) {
           implicit b ⇒
             for {
               tpe ← unsignedByte()
@@ -143,20 +143,20 @@ object Header {
         msg ← b.consume(size - 4) {
           implicit b ⇒
             tpe match {
-              case 0 ⇒ NIL.pure[F]
-              case 1 ⇒ Dataspace[F]
-              case 2 ⇒ LinkInfo[F]
-              case 3 ⇒ ??? // datatype
-              case 4 ⇒ ??? // fill value (old)
-              case 5 ⇒ ??? // fill value
-              case 6 ⇒ ??? // link
-              case 7 ⇒ ??? // external data files
-              case 8 ⇒ ??? // data layout
-              case 9 ⇒ ??? // bogus
+              case  0 ⇒ NIL.pure[F]
+              case  1 ⇒ Dataspace[F]
+              case  2 ⇒ LinkInfo[F]
+              case  3 ⇒ ??? // datatype
+              case  4 ⇒ ??? // fill value (old)
+              case  5 ⇒ ??? // fill value
+              case  6 ⇒ ??? // link
+              case  7 ⇒ ??? // external data files
+              case  8 ⇒ ??? // data layout
+              case  9 ⇒ ??? // bogus
               case 10 ⇒ ??? // group info
               case 11 ⇒ ??? // data storage – filter pipeline
               case 12 ⇒ ??? // attribute
-              case 13 ⇒ ??? // object comment
+              case 13 ⇒ Comment[F]
               case 14 ⇒ ??? // object modification time (old)
               case 15 ⇒ ??? // shared msg table
               case 16 ⇒ ??? // object header continuation
@@ -325,6 +325,13 @@ object Header {
             creationOrderIndex
           )
       }
+    }
+
+
+    case class Comment(msg: String) extends Msg
+    object Comment {
+      def apply[F[+_]: MonadErr](implicit b: Buffer[F]): F[Comment] =
+        b.ascii.map(Comment(_))
     }
   }
 }

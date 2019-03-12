@@ -20,7 +20,7 @@ object Global {
       size ← length("size")
       pos ← b.position
       end = start + size
-      objects ← b.takeUntil(end - pos) {
+      objects ← b.takeBytes(end - pos) {
         implicit b ⇒ Object[F]()
       }
     } yield {

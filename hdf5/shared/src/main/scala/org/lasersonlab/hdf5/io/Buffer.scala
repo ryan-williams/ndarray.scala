@@ -3,6 +3,7 @@ package org.lasersonlab.hdf5.io
 import java.nio.{ ByteBuffer, ByteOrder }
 import ByteOrder.LITTLE_ENDIAN
 import ByteBuffer.wrap
+import java.nio.charset.Charset
 
 import cats.implicits._
 import cats.{ Monad, MonadError }
@@ -14,6 +15,7 @@ import org.lasersonlab.hdf5.io.Buffer.{ EOFException, MonadErr }
 import org.lasersonlab.hdf5.{ Addr, Length }
 
 import scala.Array.fill
+import scala.collection.mutable
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.math.min
 
@@ -88,7 +90,7 @@ case class Buffer[F[+_]: MonadErr](fetch: Long ⇒ F[ByteBuffer]) {
       t
   }
 
-  def takeUntil[T](length: Length)(fn: Buffer[F] ⇒ F[T]): F[Vector[T]] =
+  def takeBytes[T](length: Length)(fn: Buffer[F] ⇒ F[T]): F[Vector[T]] =
     consume(length) {
       _.take(fn)
     }
@@ -184,6 +186,29 @@ case class Buffer[F[+_]: MonadErr](fetch: Long ⇒ F[ByteBuffer]) {
     position.map2(get(arr)) { fn }
 
   def position: F[Long] = buf.map2(start) { _.position() + _ }
+
+  private def bytesUntilNull(bytes: mutable.ArrayBuilder[Byte]): F[Array[Byte]] =
+    buf.>>= {
+      buf ⇒
+        var byte: Byte = 0
+        while (buf.remaining() > 0 && ({ byte = buf.get(); byte } != 0)) {
+          bytes += byte
+        }
+        if (byte == 0)
+          bytes.result().pure[F]
+        else
+          advance() >>= {
+            _ ⇒ bytesUntilNull(bytes)
+          }
+    }
+
+  def ascii: F[String] =
+    bytesUntilNull(Array.newBuilder[Byte])
+      .map {
+        bytes ⇒
+          val cs = Charset.forName("ASCII")
+          cs.decode(wrap(bytes)).toString
+      }
 }
 
 object Buffer {
