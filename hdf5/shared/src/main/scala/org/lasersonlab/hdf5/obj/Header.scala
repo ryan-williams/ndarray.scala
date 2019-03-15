@@ -1,9 +1,10 @@
 package org.lasersonlab.hdf5.obj
 
-import java.nio.ByteOrder
+import java.nio.{ ByteBuffer, ByteOrder }
 import java.time.Instant
 import java.time.Instant.ofEpochSecond
 import java.nio.ByteOrder.{ BIG_ENDIAN, LITTLE_ENDIAN }
+import java.nio.charset.StandardCharsets.{ UTF_8, US_ASCII }
 
 import cats.implicits.{ catsStdInstancesForEither ⇒ _, catsStdInstancesForTry ⇒ _, _ }
 import hammerlab.option._
@@ -164,7 +165,7 @@ object Header {
               case  3 ⇒ Datatype[F]
               case  4 ⇒ FillValue.Old[F]
               case  5 ⇒ FillValue[F]
-              case  6 ⇒ ??? // link
+              case  6 ⇒ Link[F]
               case  7 ⇒ ??? // external data files
               case  8 ⇒ ??? // data layout
               case  9 ⇒ ??? // bogus
@@ -492,7 +493,7 @@ object Header {
 
       case class String(
         pad: String.Pad,
-        charset: String.Charset
+        charset: Charset
       )
       extends Datatype
       object String {
@@ -520,18 +521,6 @@ object Header {
           case object NullTerminated extends Pad
           case object     NullPadded extends Pad
           case object    SpacePadded extends Pad
-        }
-        sealed trait Charset
-        object Charset {
-          def apply[F[+_]: MonadErr](flags: Byte): F[Charset] =
-            flags match {
-              case 0 ⇒ Ascii.pure[F]
-              case 1 ⇒  Utf8.pure[F]
-              case n ⇒ !!(s"Invalid charset enum: $n")
-            }
-
-          case object  Utf8 extends Charset
-          case object Ascii extends Charset
         }
       }
 
@@ -687,7 +676,7 @@ object Header {
         case class Sequence(base: Datatype) extends VarLength
         case class Strings(
           pad: String.Pad,
-          charset: String.Charset,
+          charset: Charset,
           base: Datatype
         )
         extends VarLength
@@ -700,8 +689,8 @@ object Header {
                 case 0 ⇒ Sequence(base).pure[F]
                 case 1 ⇒
                   for {
-                        pad ← String.    Pad(flags.byte(4,  8))
-                    charset ← String.Charset(flags.byte(8, 12))
+                        pad ← String.Pad(flags.byte(4,  8))
+                    charset ←    Charset(flags.byte(8, 12))
                   } yield
                     Strings(pad, charset, base)
                 case n ⇒ b.err(s"varlength type", n, rewind = 7)
@@ -879,11 +868,134 @@ object Header {
       }
     }
 
+    sealed trait Link extends Msg
+    object Link {
+      case class     Hard(name: String, creationOrder: ?[Long], addr: Addr           ) extends Link
+      case class     Soft(name: String, creationOrder: ?[Long], dest:  Str           ) extends Link
+      case class External(name: String, creationOrder: ?[Long], file:  Str, dest: Str) extends Link
+
+      sealed trait Type
+      object Type {
+        case object     Hard extends Type
+        case object     Soft extends Type
+        case object External extends Type
+      }
+
+      def apply[F[+_]: MonadErr](implicit b: Buffer[F]): F[Link] = {
+        import b._
+        for {
+          _ ← expect("version", 1 toByte)
+          flags ← byte()
+          tpe ← {
+            if ((flags & 0x8) == 0)
+              Type.Hard.pure[F]
+            else
+              for {
+                tpe ← byte()
+              } yield
+                tpe match {
+                  case 1 ⇒ Type.Soft
+                  case 64 ⇒ Type.External
+                  case n ⇒ err(s"link type", n)
+                }
+          }
+          creationOrder ←
+            {
+              ((flags & 0x4) > 0) ? {
+                unsignedLong("creation order")
+              }
+            }
+            .sequence
+          charset ← {
+            if ((flags & 0x10) == 0)
+              Charset.Ascii.pure[F]
+            else
+              for {
+                _ ← expect("utf-8", 1 toByte)
+              } yield
+                Charset.Utf8
+          }
+          nameBytesSize = 1 << (flags & 0x3)
+          nameBytes ← bytes("link-name bytes", nameBytesSize)
+          name = charset.decode(nameBytes)
+          link ←
+            tpe match {
+              case Type.Hard ⇒
+                for {
+                  addr ← offset("hard-link addr")
+                } yield
+                  Hard(name, creationOrder, addr)
+              case Type.Soft ⇒
+                for {
+                  length ← unsignedShort()
+                  bytes ← b.bytes("soft-link name", length)
+                } yield
+                  Soft(
+                    name,
+                    creationOrder,
+                    charset.decode(bytes)
+                  )
+              case Type.External ⇒
+                for {
+                  length ← unsignedShort()
+                  _ ← zero("external-link flags")
+                  bytes ← b.bytes("extenral-link info", length - 1)
+                  buf = ByteBuffer.wrap(bytes).order(LITTLE_ENDIAN)
+                  chars =
+                    charset
+                      .cs
+                      .decode(buf)
+                      .array
+                  strings ←
+                    chars
+                      .zipWithIndex
+                      .collect {
+                        case (ch, idx) if ch == 0.toByte ⇒ idx
+                      } match {
+                        case Array(nul) ⇒
+                          (
+                            chars.take(nul    ).mkString,
+                            chars.drop(nul + 1).mkString
+                          )
+                          .pure[F]
+                        case nulls ⇒
+                          err(s"", chars.mkString, rewind = bytes.length)
+                      }
+                  (file, path) = strings
+                } yield
+                  External(
+                    name,
+                    creationOrder,
+                    file,
+                    path
+                  )
+            }
+        } yield
+          link
+      }
+    }
+
     case class Comment(msg: String) extends Msg
     object Comment {
       def apply[F[+_]: MonadErr](implicit b: Buffer[F]): F[Comment] =
         b.ascii.map(Comment(_))
     }
+  }
+
+  sealed abstract class Charset(val cs: java.nio.charset.Charset) {
+    def decode(buf: ByteBuffer): String = cs.decode(buf).toString
+    def decode(bytes: Arr[Byte]): String = decode(ByteBuffer.wrap(bytes).order(LITTLE_ENDIAN))
+  }
+  object Charset {
+    def apply[F[+_]: MonadErr](flags: Byte): F[Charset] =
+      flags match {
+        case 0 ⇒ Ascii.pure[F]
+        case 1 ⇒  Utf8.pure[F]
+        case n ⇒ !!(s"Invalid charset enum: $n")
+      }
+
+    case object  Utf8 extends Charset(UTF_8)
+    case object Ascii extends Charset(US_ASCII)
   }
 
   implicit class BitSetOps(val bitSet: BitSet) extends AnyVal {
