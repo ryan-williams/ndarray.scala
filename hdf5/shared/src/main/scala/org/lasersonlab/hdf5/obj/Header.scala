@@ -18,6 +18,9 @@ import BitSet.fromBitMask
 
 object Header {
   type Str = scala.Predef.String
+  type Arr[T] = scala.Array[T]
+  val Arr = scala.Array
+
   case class V1(
     refCount: Int,
     msgs: Vector[Msg]
@@ -52,7 +55,7 @@ object Header {
     def apply[F[+_]: MonadErr](implicit b: Buffer[F]): F[V2] = {
       import b._
       for {
-        _ ← expect("signature", Array[Byte]('O', 'H', 'D', 'R'))
+        _ ← expect("signature", Arr[Byte]('O', 'H', 'D', 'R'))
         _ ← expect("version", 2 toByte)
         flags ← byte()
         times ←
@@ -358,7 +361,7 @@ object Header {
           cls = bits & 0xf
           version ← Version[F]((bits & 0xf0) >> 4)
           flagBytes ← b.getLong(3)
-          flags = fromBitMask(Array(flagBytes))
+          flags = fromBitMask(Arr(flagBytes))
           size ← signedInt("size")
           datatype ← cls match {
             case  0 ⇒    FixedPoint[F](flags)
@@ -370,8 +373,9 @@ object Header {
             case  6 ⇒      Compound[F](flags, version, size)
             case  7 ⇒     Reference[F](flags)
             case  8 ⇒   Enumeration[F](flags, version)
-            case  9 ⇒ ??? : F[Datatype] // Variable-Length
-            case 10 ⇒ ??? : F[Datatype] // Array
+            case  9 ⇒     VarLength[F](flags)
+            case 10 ⇒         Array[F](flags, version)
+            case  n ⇒ err("datatype", n, rewind = 7)
           }
         } yield
           datatype
@@ -442,8 +446,8 @@ object Header {
               (flags(6), flags(0)) match {
                 case (false, false) ⇒ LITTLE_ENDIAN.pure[F]
                 case (false,  true) ⇒    BIG_ENDIAN.pure[F]
-                case ( true, false) ⇒ new IllegalArgumentException(s"Invalid endianness bits: {true, false}").raiseError[F, ByteOrder]
-                case ( true,  true) ⇒ new IllegalArgumentException(s"VAX-endianness unsupported").raiseError[F, ByteOrder]
+                case ( true, false) ⇒ err(s"Invalid endianness bits: {true, false}", flags)
+                case ( true,  true) ⇒ err(s"VAX-endianness unsupported", flags)
               }
             signPos = flags.byte(0, 8)
             mantissaNormalization ← MantissaNormalization[F](flags(5), flags(4))
@@ -572,7 +576,7 @@ object Header {
               if (length == roundUp(description.length, 8))
                 (()).pure[F]
               else
-                new IllegalArgumentException(s"'Opaque' header message description has length ${description.length}, expected to round up by 8 to $length: $description").raiseError[F, Unit]
+                b.err(s"'Opaque' header message description has length ${description.length}, expected to round up by 8 to $length: $description", length, rewind = description.length)
             }
           } yield
             new Opaque(description)
@@ -645,7 +649,7 @@ object Header {
           flags.byte(0, 4) match {
             case 0 ⇒ Object.pure[F]
             case 1 ⇒ Region.pure[F]
-            case n ⇒ new IllegalArgumentException(s"Reference type: $n").raiseError[F, Reference]
+            case n ⇒ err(s"Reference type", n, rewind = 7)
           }
         }
       }
@@ -666,7 +670,10 @@ object Header {
                 case `3` ⇒ b.ascii
               }
             }
-            values ← takeN(num) { implicit b ⇒ ??? : F[Int] }
+            values ← takeN(num) { implicit b ⇒
+              // TODO: verify that `base` is a scalar integer; parse value accordingly. Later: support other types as well
+              ??? : F[Int]
+            }
             elems =
               names.zip(values).map {
                 case (name, value) ⇒
@@ -674,6 +681,76 @@ object Header {
               }
           } yield
             Enumeration(elems)
+        }
+      }
+
+      sealed trait VarLength extends Datatype
+      object VarLength {
+        case class Sequence(base: Datatype) extends VarLength
+        case class Strings(
+          pad: String.Pad,
+          charset: String.Charset,
+          base: Datatype
+        )
+        extends VarLength
+
+        def apply[F[+_]: MonadErr](flags: BitSet)(implicit b: Buffer[F]): F[VarLength] = {
+          for {
+            base ← Datatype[F]
+            varlength ←
+              flags.int(0, 4) match {
+                case 0 ⇒ Sequence(base).pure[F]
+                case 1 ⇒
+                  for {
+                        pad ← String.    Pad[F](flags.byte(4,  8))
+                    charset ← String.Charset[F](flags.byte(8, 12))
+                  } yield
+                    Strings(pad, charset, base)
+                case n ⇒ b.err(s"varlength type", n, rewind = 7)
+              }
+          } yield
+            varlength
+        }
+      }
+
+      case class Array(base: Datatype, dimensions: Vector[Long]) extends Datatype
+      object Array {
+        def apply[F[+_]: MonadErr](flags: BitSet, version: Version)(implicit b: Buffer[F]): F[Array] = {
+          import b._
+          import Version._
+          version match {
+            case `1` ⇒ err(s"datatype version for array", 1, rewind = 7)
+            case `2` ⇒
+              for {
+                dimensionality ← unsignedByte()
+                _ ← expect("reserved", 0 toByte, 3)
+                     dimensions ← takeN(dimensionality) { _.unsignedInt() }
+                permutationIdxs ← takeN(dimensionality) { _.unsignedInt() }
+                _ ←
+                  permutationIdxs
+                    .zipWithIndex
+                    .map {
+                      case (permutationIdx, idx) ⇒
+                        if (permutationIdx == idx)
+                          (()).pure[F]
+                        else
+                          err(s"Non-identity permutation", (permutationIdx, idx), rewind = 4 * (dimensionality - idx))
+                    }
+                    .sequence
+                base ← Datatype[F]
+              } yield
+                Array(base, dimensions)
+            case `3` ⇒
+              for {
+                dimensionality ← unsignedByte()
+                dimensions ← takeN(dimensionality) {
+                  implicit b ⇒ import b._
+                    unsignedInt()
+                }
+                base ← Datatype[F]
+              } yield
+                Array(base, dimensions)
+          }
         }
       }
     }

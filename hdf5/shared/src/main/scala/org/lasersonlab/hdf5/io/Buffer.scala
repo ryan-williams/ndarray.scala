@@ -333,10 +333,10 @@ case class Buffer[F[+_]: MonadErr](fetch: Long ⇒ F[ByteBuffer]) {
 
   def byte(): F[Byte] = get
 
-  def err[V, T](name: String, value: V, offset: Int = 0): F[T] =
+  def err[V, T](name: String, value: V, rewind: Int = 0): F[T] =
     position.>>= {
       pos ⇒
-        UnsupportedValue(name, value, pos - offset)
+        UnsupportedValue(name, value, pos - rewind)
           .raiseError[F, T]
     }
 
