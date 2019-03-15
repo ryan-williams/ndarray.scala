@@ -4,11 +4,11 @@ import java.nio.{ ByteBuffer, ByteOrder }
 import java.time.Instant
 import java.time.Instant.ofEpochSecond
 import java.nio.ByteOrder.{ BIG_ENDIAN, LITTLE_ENDIAN }
-import java.nio.charset.StandardCharsets.{ UTF_8, US_ASCII }
+import java.nio.charset.StandardCharsets.{ US_ASCII, UTF_8 }
 
 import cats.implicits.{ catsStdInstancesForEither ⇒ _, catsStdInstancesForTry ⇒ _, _ }
 import hammerlab.option._
-import org.lasersonlab.hdf5.Addr
+import org.lasersonlab.hdf5.{ Addr, Length }
 import org.lasersonlab.hdf5.io.Buffer
 import org.lasersonlab.hdf5.io.Buffer.{ MonadErr, UnsupportedValue }
 import org.lasersonlab.hdf5.obj.Header.Msg.Datatype.FloatingPoint.MantissaNormalization
@@ -972,6 +972,115 @@ object Header {
             }
         } yield
           link
+      }
+    }
+
+    sealed trait DataLayout extends Msg
+    object DataLayout {
+      case class    Compact(data: Array[Byte], dimensions: ?[Vector[Long]] = None) extends DataLayout
+      sealed abstract class Contiguous(val addr: Addr) extends DataLayout
+      object Contiguous {
+        case class V12(override val addr: Addr, dimensions: Vector[Long]) extends Contiguous(addr)
+        case class V3 (override val addr: Addr,           length: Length) extends Contiguous(addr)
+      }
+      case class    Chunked(addr: Addr, dimensions: Vector[Long], elemSize: Int) extends DataLayout
+
+      sealed trait Class
+      object Class {
+        case object    Compact extends Class
+        case object Contiguous extends Class
+        case object    Chunked extends Class
+
+        def apply[F[+_]: MonadErr](n: Int): F[Class] =
+          n match {
+            case 0 ⇒    Compact.pure[F]
+            case 1 ⇒ Contiguous.pure[F]
+            case 2 ⇒    Chunked.pure[F]
+            case n ⇒ !!(s"Invalid Data Layout class: $n")
+          }
+      }
+
+      def apply[F[+_]: MonadErr](implicit b: Buffer[F]): F[DataLayout] = {
+        import b._
+        for {
+          version ← byte()
+          layout ←
+            version match {
+              case 1 | 2 ⇒
+                for {
+                  dimensionality ← unsignedByte()
+                  layoutByte ← byte()
+                  clz ← Class(layoutByte)
+                  _ ← expect("reserved", 0 toByte, 5)
+                  datalayout ←
+                    clz match {
+                      case Class.Compact ⇒
+                        for {
+                          dimensions ← takeN(dimensionality) { _.getLong }
+                          size ← signedInt("compact data size")
+                          data ← bytes("compact data bytes", size)
+                        } yield
+                          Compact(data, Some(dimensions))
+                      case Class.Contiguous ⇒
+                        for {
+                          addr ← offset("data address")
+                          dimensions ← takeN(dimensionality) { _.getLong }
+                        } yield
+                          Contiguous.V12(
+                            addr,
+                            dimensions
+                          )
+                      case Class.Chunked ⇒
+                        for {
+                          addr ← offset("data address")
+                          dimensions ← takeN(dimensionality - 1) { _.getLong }
+                          elemSize ← signedInt("chunked data elem size")
+                        } yield
+                          Chunked(
+                            addr,
+                            dimensions,
+                            elemSize
+                          )
+                    }
+                } yield
+                  datalayout
+              case 3 ⇒
+                for {
+                  layoutByte ← byte()
+                  clz ← Class(layoutByte)
+                  datalayout ←
+                    clz match {
+                      case Class.Compact ⇒
+                        for {
+                          size ← unsignedShort()
+                          data ← bytes("compact data", size)
+                        } yield
+                          Compact(data)
+                      case Class.Contiguous ⇒
+                        for {
+                          addr ← offset("contiguous data offset")
+                           len ← length("contiguous data length")
+                        } yield
+                          Contiguous.V3(addr, len)
+                      case Class.Chunked ⇒
+                        for {
+                          dimensionality ← unsignedByte()
+                          addr ← offset("chunked data")
+                          dimensions ← takeN(dimensionality) { _.getLong }
+                          elemSize ← signedInt("chunked data elem size")
+                        } yield
+                          Chunked(
+                            addr,
+                            dimensions,
+                            elemSize
+                          )
+                    }
+                } yield
+                  datalayout
+              case n ⇒ err(s"data layout version", n, rewind = 1)
+            }
+        } yield
+          layout
       }
     }
 
