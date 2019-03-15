@@ -7,7 +7,7 @@ import org.lasersonlab.hdf5.btree.V2.Node.{ Internal, Leaf }
 import org.lasersonlab.hdf5.heap.Fractal
 import org.lasersonlab.hdf5.{ Addr, Length, Mask }
 import org.lasersonlab.hdf5.io.Buffer
-import org.lasersonlab.hdf5.io.Buffer.{ MonadErr, UnsupportedValue, syntax }
+import org.lasersonlab.hdf5.io.Buffer.{ MonadErr, UnsupportedValue }
 
 import Array.fill
 
@@ -55,7 +55,7 @@ object V2 {
   }
   object Header {
     def apply[F[+_]: MonadErr](implicit b: Buffer[F]): F[Header] = {
-      val s = syntax(b); import s._
+      import b._
       for {
         pos ← b.position
         _ ← expect("signature", Array[Byte]('B', 'T', 'H', 'D'))
@@ -116,11 +116,11 @@ object V2 {
     case object IndirectUnfiltered extends Objects(1, false, false) {
       case class Record(addr: Addr, length: Length, heapID: Length) extends Type.Record
       def apply[F[+_]: MonadErr](implicit b: Buffer[F]): F[Record] = {
-        val s = syntax(b); import s._
+        import b._
         for {
           addr ← offset("addr")
-          length ← s.length("length")
-          heapId ← s.length("heap ID")
+          length ← b.length("length")
+          heapId ← b.length("heap ID")
         } yield
           Record(addr, length, heapId)
       }
@@ -128,12 +128,12 @@ object V2 {
     case object   IndirectFiltered extends Objects(2, false,  true) {
       case class Record(addr: Addr, length: Length, filtered: Filtered, heapID: Length) extends Type.Record
       def apply[F[+_]: MonadErr](implicit b: Buffer[F]): F[Record] = {
-        val s = syntax(b); import s._
+        import b._
         for {
           addr ← offset("addr")
-          length ← s.length("length")
+          length ← b.length("length")
           filtered ← Filtered[F]
-          heapId ← s.length("heap ID")
+          heapId ← b.length("heap ID")
         } yield
           Record(addr, length, filtered, heapId)
       }
@@ -141,7 +141,7 @@ object V2 {
     case object   DirectUnfiltered extends Objects(3,  true, false) {
       case class Record(addr: Addr, length: Length                                    ) extends Type.Record
       def apply[F[+_]: MonadErr](implicit b: Buffer[F]): F[Record] = {
-        val s = syntax(b); import s._
+        import b._
         for {
           addr ← offset("addr")
           length ← length("length")
@@ -152,7 +152,7 @@ object V2 {
     case object     DirectFiltered extends Objects(4,  true,  true) {
       case class Record(addr: Addr, length: Length, filtered: Filtered                ) extends Type.Record
       def apply[F[+_]: MonadErr](implicit b: Buffer[F]): F[Record] = {
-        val s = syntax(b); import s._
+        import b._
         for {
           addr ← offset("addr")
           length ← length("length")
@@ -171,7 +171,7 @@ object V2 {
       )
       extends Type.Record
       def apply[F[+_]: MonadErr](implicit b: Buffer[F]): F[Record] = {
-        val s = syntax(b); import s._
+        import b._
         for {
           header ← bool("msg in object header")
           hash ← signedInt("hash")
@@ -186,7 +186,7 @@ object V2 {
     case object GroupNames          extends Index(5,  true, false) {
       case class Record(hash: Int, id: Fractal.Id) extends Type.Record
       def apply[F[+_]: MonadErr](implicit b: Buffer[F]): F[Record] = {
-        val s = syntax(b); import s._
+        import b._
         for {
           hash ← signedInt("hash")
           bytes ← bytes("fractal heap id", 7)
@@ -197,7 +197,7 @@ object V2 {
     case object GroupCreationOrders extends Index(6, false, false) {
       case class Record(creationOrder: Long, id: Fractal.Id) extends Type.Record
       def apply[F[+_]: MonadErr](implicit b: Buffer[F]): F[Record] = {
-        val s = syntax(b); import s._
+        import b._
         for {
           creationOrder ← b.getLong
           bytes ← bytes("fractal heap id", 7)
@@ -208,7 +208,7 @@ object V2 {
     case object  AttrNames          extends Index(8,  true,  true) {
       case class Record(id: Fractal.Id, flags: Byte, creationOrder: Int, nameHash: Int) extends Type.Record
       def apply[F[+_]: MonadErr](implicit b: Buffer[F]): F[Record] = {
-        val s = syntax(b); import s._
+        import b._
         for {
           id ← bytes("fractal heap id", 8)
           flags ← b.get
@@ -221,7 +221,7 @@ object V2 {
     case object  AttrCreationOrders extends Index(9, false,  true) {
       case class Record(id: Fractal.Id, flags: Byte, creationOrder: Int) extends Type.Record
       def apply[F[+_]: MonadErr](implicit b: Buffer[F]): F[Record] = {
-        val s = syntax(b); import s._
+        import b._
         for {
           id ← bytes("fractal heap id", 8)
           flags ← b.get
@@ -238,7 +238,7 @@ object V2 {
     )
     object Filtered {
       def apply[F[+_]: MonadErr](implicit b: Buffer[F]): F[Filtered] = {
-        val s = syntax(b); import s._
+        import b._
         for {
           mask ← Mask[F]
           memSize ← length("filtered object memory size")
@@ -254,7 +254,7 @@ object V2 {
     case object UnfilteredChunks extends Chunks(10, false) {
       case class Record(addr: Addr, offsets: Vector[Long]) extends Type.Record
       def apply[F[+_]: MonadErr](implicit b: Buffer[F]): F[Record] = {
-        val s = syntax(b); import s._
+        import b._
         for {
           addr ← offset("addr")
           offsets = ???  // need to know number of dimensions…?
@@ -265,7 +265,7 @@ object V2 {
     case object FilteredChunks extends Chunks(11, true) {
       case class Record(addr: Addr, size: Long, mask: Mask, offsets: Vector[Long]) extends Type.Record
       def apply[F[+_]: MonadErr](implicit b: Buffer[F]): F[Record] = {
-        val s = syntax(b); import s._
+        import b._
         for {
           addr ← offset("addr")
           size = ???  // variable size; need from context
@@ -278,7 +278,7 @@ object V2 {
 
     object Objects {
       def apply[F[+_]: MonadErr](tpe: Byte)(implicit b: Buffer[F]): F[Unit] = {
-        val s = syntax(b); import s._
+        import b._
         for {
           pos ← b.position
           addr ← offset("object address")
@@ -305,7 +305,7 @@ object V2 {
       )
       object Child {
         def apply[F[+_]: MonadErr](depth: Int, numRecordsSize: Int, totalRecordsSize: Int)(implicit b: Buffer[F]): F[Child] = {
-          val s = syntax(b); import s._
+          import b._
           for {
             addr ← offset("addr")
             numRecords ← b.getN(numRecordsSize, fill(8)(0 toByte), _.getLong)
@@ -333,7 +333,7 @@ object V2 {
         b: Buffer[F]
       ):
         F[Internal] = {
-        val s = syntax(b); import s._
+        import b._
         for {
           _ ← expect("signature", Array[Byte]('B', 'T', 'I', 'N'))
           _ ← zero("version")
@@ -349,7 +349,7 @@ object V2 {
     case class Leaf[R <: Type.Record](tpe: Type.Aux[R], records: Vector[R]) extends Node
     object Leaf {
       def apply[F[+_]: MonadErr](tpe: Type, N: Int)(implicit b: Buffer[F]): F[Leaf[tpe.Record]] = {
-        val s = syntax(b); import s._
+        import b._
         for {
           _ ← expect("signature", Array[Byte]('B', 'T', 'L', 'F'))
           _ ← zero("version")

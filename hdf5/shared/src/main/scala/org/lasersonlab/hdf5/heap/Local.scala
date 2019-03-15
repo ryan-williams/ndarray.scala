@@ -2,7 +2,7 @@ package org.lasersonlab.hdf5.heap
 
 import cats.implicits._
 import org.lasersonlab.hdf5.io.Buffer
-import org.lasersonlab.hdf5.io.Buffer.{ MonadErr, syntax }
+import org.lasersonlab.hdf5.io.Buffer.MonadErr
 import org.lasersonlab.hdf5.{ Addr, Length }
 
 case class Local(
@@ -12,7 +12,7 @@ case class Local(
 )
 object Local {
   def apply[F[+_]: MonadErr]()(implicit b: Buffer[F]): F[Local] = {
-    val s = syntax(b); import s._
+    import b._
     for {
       _ ← expect("magic", Array[Byte]('H', 'E', 'A', 'P'))
       _ ← expect("version", 0 toByte)

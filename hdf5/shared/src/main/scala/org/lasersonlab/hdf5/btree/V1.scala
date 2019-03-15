@@ -6,12 +6,12 @@ import hammerlab.option._
 import org.lasersonlab.hdf5.btree.V1.Node.{ Data, Group }
 import org.lasersonlab.hdf5.{ Addr, Mask, UInt }
 import org.lasersonlab.hdf5.io.Buffer
-import org.lasersonlab.hdf5.io.Buffer.{ MonadErr, UnsupportedValue, syntax }
+import org.lasersonlab.hdf5.io.Buffer.{ MonadErr, UnsupportedValue }
 
 object V1 {
   val MAGIC = Array[Byte]('T', 'R', 'E', 'E')
   def apply[F[+_]: MonadErr](K: Int)(implicit b: Buffer[F]): F[Unit] = {
-    val s = syntax(b); import s._
+    import b._
     for {
       _ ← expect("magic", MAGIC)
       tpe ← Type[F]()
@@ -73,7 +73,7 @@ object V1 {
       case class Key(address: Addr)
 
       def children[F[+_]: MonadErr](K: Int)(implicit b: Buffer[F]): F[Seq[Entry]] = {
-        val s = syntax(b); import s._
+        import b._
         for {
           _ ← length("unused group key 0")
           children ←
@@ -111,7 +111,7 @@ object V1 {
         idxs: Seq[Long]
       )
       def children[F[+_]: MonadErr](K: Int)(implicit b: Buffer[F]): F[Seq[Entry]] = {
-        val s = syntax(b); import s._
+        import b._
         for {
           children ←
             {

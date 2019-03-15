@@ -5,13 +5,13 @@ import hammerlab.collection._
 import hammerlab.math.utils._
 import org.lasersonlab.hdf5.heap.Global.Object
 import org.lasersonlab.hdf5.io.Buffer
-import org.lasersonlab.hdf5.io.Buffer.{ EOFException, MonadErr, syntax }
+import org.lasersonlab.hdf5.io.Buffer.{ EOFException, MonadErr }
 import org.lasersonlab.hdf5.{ Addr, Length }
 
 case class Global(objects: Vector[Object])
 object Global {
   def apply[F[+_]: MonadErr]()(implicit b: Buffer[F]): F[Global] = {
-    val s = syntax(b); import s._
+    import b._
     for {
       start ← b.position
       _ ← expect("magic", Array[Byte]('G', 'C', 'O', 'L'))
@@ -36,7 +36,7 @@ object Global {
   )
   object Object {
     def apply[F[+_]: MonadErr]()(implicit b: Buffer[F]): F[Object] = {
-      val s = syntax(b); import s._
+      import b._
       val F = MonadErr[F]
       for {
         id ← unsignedShort()
@@ -54,7 +54,7 @@ object Global {
   case class ID(heap: Addr, idx: Long)
   object ID {
     def apply[F[+_]: MonadErr]()(implicit b: Buffer[F]): F[ID] = {
-      val s = syntax(b); import s._
+      import b._
       for {
         heap ← offset("heap")
         idx ← unsignedInt()

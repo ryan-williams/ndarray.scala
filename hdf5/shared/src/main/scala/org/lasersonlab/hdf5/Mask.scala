@@ -2,7 +2,7 @@ package org.lasersonlab.hdf5
 
 import cats.implicits._
 import org.lasersonlab.hdf5.io.Buffer
-import org.lasersonlab.hdf5.io.Buffer.{ MonadErr, syntax }
+import org.lasersonlab.hdf5.io.Buffer.MonadErr
 
 import scala.collection.immutable.BitSet
 import BitSet.fromBitMask
@@ -10,7 +10,7 @@ import BitSet.fromBitMask
 case class Mask(bits: BitSet)
 object Mask {
   def apply[F[+_]: MonadErr](implicit b: Buffer[F]): F[Mask] = {
-    val s = syntax(b); import s._
+    import b._
     for {
       l1 ← b.getLong
       l2 ← b.getLong

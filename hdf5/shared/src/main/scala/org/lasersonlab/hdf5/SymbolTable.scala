@@ -4,7 +4,7 @@ import cats.implicits._
 import hammerlab.either._
 import hammerlab.option._
 import org.lasersonlab.hdf5.io.Buffer
-import org.lasersonlab.hdf5.io.Buffer.{ MonadErr, UnsupportedValue, syntax }
+import org.lasersonlab.hdf5.io.Buffer.{ MonadErr, UnsupportedValue }
 
 //case class SymbolTable(
 //  name: Long,
@@ -13,7 +13,7 @@ import org.lasersonlab.hdf5.io.Buffer.{ MonadErr, UnsupportedValue, syntax }
 //)
 object SymbolTable {
 //  def apply[F[+_]: MonadErr]()(implicit b: Buffer[F]): F[SymbolTable] = {
-//    val s = syntax(b); import s._
+//    import b._
 //    for {
 //      name ← offset("name")
 //      header ← offset("header")
@@ -36,9 +36,9 @@ object SymbolTable {
   object Entry {
 
     def apply[F[+_]: MonadErr]()(implicit b: Buffer[F]): F[Entry] = {
-      val s = syntax(b); import s._
+      import b._
       for {
-        pos ← b.position
+        pos ← position
         nameOffset ← offset  (   "name offset")
               addr ← offset_?("header address")
         cacheType ← unsignedByte()
@@ -48,7 +48,7 @@ object SymbolTable {
             for {
               addr ← addr.fold[F[Addr]](UnsupportedValue("name offset", -1L, pos + 4).raiseError[F, Addr])(_.pure[F])
               // burn 16 bytes of unused "scratch" space
-              _ ← b.burn(16)
+              _ ← burn(16)
             } yield {
               Object(nameOffset, addr, None)
             }
@@ -62,7 +62,7 @@ object SymbolTable {
             for {
               localHeapOffset ← unsignedInt()
               // burn the remaining 12 bytes of scratchpad
-              _ ← buf.burn(12)
+              _ ← burn(12)
             } yield
               Link(
                 nameOffset,

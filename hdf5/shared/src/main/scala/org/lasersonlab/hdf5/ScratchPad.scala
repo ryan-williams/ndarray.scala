@@ -2,7 +2,7 @@ package org.lasersonlab.hdf5
 
 import cats.implicits._
 import org.lasersonlab.hdf5.io.Buffer
-import org.lasersonlab.hdf5.io.Buffer.{ MonadErr, syntax }
+import org.lasersonlab.hdf5.io.Buffer.MonadErr
 
 case class ScratchPad(
   btree: Long,
@@ -10,7 +10,7 @@ case class ScratchPad(
 )
 object ScratchPad {
   def apply[F[+_]: MonadErr]()(implicit b: Buffer[F]): F[ScratchPad] = {
-    val s = syntax(b); import s._
+    import b._
     for {
       btree ← offset("btree")
       nameHeap ← offset("nameHeap")
@@ -21,4 +21,3 @@ object ScratchPad {
       )
   }
 }
-

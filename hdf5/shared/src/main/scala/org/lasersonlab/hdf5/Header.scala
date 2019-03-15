@@ -6,7 +6,7 @@ import cats.implicits._
 import hammerlab.either._
 import org.lasersonlab.files.Uri
 import org.lasersonlab.hdf5.io.Buffer
-import org.lasersonlab.hdf5.io.Buffer.{ EOFException, MonadErr, syntax }
+import org.lasersonlab.hdf5.io.Buffer.{ EOFException, MonadErr }
 
 import scala.concurrent.{ ExecutionContext, Future }
 import Array.fill
@@ -25,7 +25,7 @@ object Header {
   extends Header
   object V0 {
     def apply[F[+_]: MonadErr](implicit b: Buffer[F]): F[V0] = {
-      val s = syntax(b); import s._
+      import b._
       for {
         _ ← zero("free space")
         _ ← zero("root group")
@@ -68,7 +68,7 @@ object Header {
       header
 
   def apply[F[+_]: MonadErr]()(implicit b: Buffer[F]): F[Header] = {
-    val s = syntax(b); import s._
+    import b._
 
     def superblock(offset: Long = 0): F[Long] = {
       for {

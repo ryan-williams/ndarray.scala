@@ -8,9 +8,10 @@ import cats.implicits._
 import hammerlab.option._
 import org.lasersonlab.hdf5.Addr
 import org.lasersonlab.hdf5.io.Buffer
-import org.lasersonlab.hdf5.io.Buffer.{ MonadErr, UnsupportedValue, syntax }
+import org.lasersonlab.hdf5.io.Buffer.{ MonadErr, UnsupportedValue }
 import org.lasersonlab.hdf5.obj.Header.Msg.Datatype.FloatingPoint.MantissaNormalization
 import org.lasersonlab.hdf5.obj.Header.V2.{ MaxAttrs, Times }
+import org.lasersonlab.math.utils.roundUp
 
 import scala.collection.immutable.BitSet
 import BitSet.fromBitMask
@@ -23,7 +24,7 @@ object Header {
   )
   object V1 {
     def apply[F[+_]: MonadErr]()(implicit b: Buffer[F]): F[V1] = {
-      val s = syntax(b); import s._
+      import b._
       for {
         _ ← expect("version", 1 toByte)
         _ ← zero("reserved")
@@ -49,7 +50,7 @@ object Header {
 
   object V2 {
     def apply[F[+_]: MonadErr](implicit b: Buffer[F]): F[V2] = {
-      val s = syntax(b); import s._
+      import b._
       for {
         _ ← expect("signature", Array[Byte]('O', 'H', 'D', 'R'))
         _ ← expect("version", 2 toByte)
@@ -139,7 +140,7 @@ object Header {
   sealed trait Msg
   object Msg {
     def apply[F[+_]: MonadErr](implicit b: Buffer[F]): F[Msg] = {
-      val s = syntax(b); import s._
+      import b._
       for {
         pos ← b.position
         tpe ← unsignedShort()
@@ -152,7 +153,7 @@ object Header {
               case  0 ⇒ NIL.pure[F]
               case  1 ⇒ Dataspace[F]
               case  2 ⇒ LinkInfo[F]
-              case  3 ⇒ ??? // datatype
+              case  3 ⇒ Datatype[F]
               case  4 ⇒ ??? // fill value (old)
               case  5 ⇒ ??? // fill value
               case  6 ⇒ ??? // link
@@ -185,7 +186,7 @@ object Header {
     sealed trait Dataspace extends Msg
     object Dataspace {
       def apply[F[+_]: MonadErr](implicit b: Buffer[F]): F[Dataspace] = {
-        val s = syntax(b); import s._
+        import b._
         for {
           version ← byte()
           dataspace ←
@@ -209,7 +210,7 @@ object Header {
 
       object V1 {
         def apply[F[+_]: MonadErr](implicit b: Buffer[F]): F[Simple] = {
-          val s = syntax(b); import s._
+          import b._
           for {
             rank ← unsignedByte()
             flags ← byte()
@@ -230,7 +231,7 @@ object Header {
 
       object V2 {
         def apply[F[+_]: MonadErr](implicit b: Buffer[F]): F[Dataspace] = {
-          val s = syntax(b); import s._
+          import b._
           for {
             rank ← unsignedByte()
             flags ← byte()
@@ -256,7 +257,7 @@ object Header {
 
       object Dimensions {
         def apply[F[+_]: MonadErr](rank: Short, flags: Byte)(implicit b: Buffer[F]): F[Vector[Dimension]] = {
-          val s = syntax(b); import s._
+          import b._
           for {
             sizes ← unsignedLongs("dimensions", rank)
             maxs ←
@@ -301,7 +302,7 @@ object Header {
     extends Msg
     object LinkInfo {
       def apply[F[+_]: MonadErr](implicit b: Buffer[F]): F[LinkInfo] = {
-        val s = syntax(b); import s._
+        import b._
         for {
           _ ← expect("version", 0 toByte)
           flags ← byte()
@@ -333,7 +334,7 @@ object Header {
       }
     }
 
-    sealed trait Datatype
+    sealed trait Datatype extends Msg
     object Datatype {
 
       sealed trait Version
@@ -351,7 +352,7 @@ object Header {
       }
 
       def apply[F[+_]: MonadErr](implicit b: Buffer[F]): F[Datatype] = {
-        val s = syntax(b); import s._
+        import b._
         for {
           bits ← byte()
           cls = bits & 0xf
@@ -367,8 +368,8 @@ object Header {
             case  4 ⇒      Bitfield[F](flags)
             case  5 ⇒        Opaque[F](flags)
             case  6 ⇒      Compound[F](flags, version, size)
-            case  7 ⇒ ??? : F[Datatype] // Reference
-            case  8 ⇒ ??? : F[Datatype] // Enumerated
+            case  7 ⇒     Reference[F](flags)
+            case  8 ⇒   Enumeration[F](flags, version)
             case  9 ⇒ ??? : F[Datatype] // Variable-Length
             case 10 ⇒ ??? : F[Datatype] // Array
           }
@@ -387,7 +388,7 @@ object Header {
       object FixedPoint {
         case class Pad(lo: Boolean, hi: Boolean)
         def apply[F[+_]: MonadErr](flags: BitSet)(implicit b: Buffer[F]): F[FixedPoint] = {
-          val s = syntax(b); import s._
+          import b._
           val order = if (flags(0)) LITTLE_ENDIAN else BIG_ENDIAN
           val pad = Pad(flags(1), flags(2))
           val signed = flags(3)
@@ -434,7 +435,7 @@ object Header {
           case object Implied extends MantissaNormalization
         }
         def apply[F[+_]: MonadErr](flags: BitSet)(implicit b: Buffer[F]): F[FloatingPoint] = {
-          val s = syntax(b); import s._
+          import b._
           val pad = Pad(flags(1), flags(2), flags(3))
           for {
             order ←
@@ -475,7 +476,7 @@ object Header {
       extends Datatype
       object Time {
         def apply[F[+_]: MonadErr](flags: BitSet)(implicit b: Buffer[F]): F[Time] = {
-          val s = syntax(b); import s._
+          import b._
           val order = if (flags(0)) LITTLE_ENDIAN else BIG_ENDIAN
           for {
             precision ← signedInt("precision")
@@ -494,7 +495,7 @@ object Header {
       extends Datatype
       object String {
         def apply[F[+_]: MonadErr](flags: BitSet)(implicit b: Buffer[F]): F[String] = {
-          val s = syntax(b); import s._
+          import b._
           for {
                 pad ←     Pad[F](flags.byte(0, 4))
             charset ← Charset[F](flags.byte(4, 8))
@@ -542,7 +543,7 @@ object Header {
       object Bitfield {
         case class Pad(lo: Boolean, hi: Boolean)
         def apply[F[+_]: MonadErr](flags: BitSet)(implicit b: Buffer[F]): F[Bitfield] = {
-          val s = syntax(b); import s._
+          import b._
           val order = if (flags(0)) LITTLE_ENDIAN else BIG_ENDIAN
           val pad = Pad(flags(1), flags(2))
           for {
@@ -585,61 +586,94 @@ object Header {
       object Compound {
         case class Elem(name: Str, offset: Int, datatype: Datatype)
         def apply[F[+_]: MonadErr](flags: BitSet, version: Version, size: Int)(implicit b: Buffer[F]): F[Compound] = {
-          val s = syntax(b); import s._
+          import b._
           import Version._
           val num = flags.int(0, 16)
           for {
-            datatypes ← {
+            datatypes ← takeN(num) {
+              implicit b ⇒ import b._
               for {
-                i ← (0 until num).toVector
-              } yield {
-                for {
-                  name ← b.ascii
-                  _ ←
-                    version match {
-                      case `1` | `2` ⇒ expect("null pad", 0 toByte, roundUp(name.length, 8) - name.length)
-                      case `3` ⇒ (()).pure[F]
-                    }
-                  offset ←
-                    version match {
-                      case `1` | `2` ⇒ signedInt("elem offset")
-                      case `3` ⇒ b.getInt(
-                        if (size < (1 <<  8)) 1 else
-                        if (size < (1 << 16)) 2 else
-                        if (size < (1 << 24)) 3 else
-                                              4
-                      )
-                    }
-                  _ ←
-                    version match {
-                      case `1` ⇒
-                        for {
-                          dimensionality ← unsignedByte()
-                          _ ← expect("reserved", 0 toByte, 3)
-                          _ ← expect("permutation idxs", 0 toByte, 4)
-                          _ ← expect("reserved", 0 toByte, 4)
-                          dimensions ←
-                            {
-                              for {
-                                dim ← (0 until dimensionality).toVector
-                              } yield
-                                unsignedInt()
-                            }
-                            .sequence
-                        } yield
-                          ()
-                      case `2` | `3` ⇒ (()).pure[F]
-                    }
-                  datatype ← Datatype[F]
-                } yield
-                  Elem(name, offset, datatype)
-              }
+                name ←
+                  version match {
+                    case `1` | `2` ⇒ b.ascii(8)
+                    case `3` ⇒ b.ascii
+                  }
+                offset ←
+                  version match {
+                    case `1` | `2` ⇒ signedInt("elem offset")
+                    case `3` ⇒ b.getInt(
+                      if (size < (1 <<  8)) 1 else
+                      if (size < (1 << 16)) 2 else
+                      if (size < (1 << 24)) 3 else
+                                            4
+                    )
+                  }
+                _ ←
+                  version match {
+                    case `1` ⇒
+                      for {
+                        dimensionality ← unsignedByte()
+                        _ ← expect("reserved", 0 toByte, 3)
+                        _ ← expect("permutation idxs", 0 toByte, 4)
+                        _ ← expect("reserved", 0 toByte, 4)
+                        dimensions ← takeN(dimensionality) {
+                          implicit b ⇒ import b._
+                            unsignedInt()
+                        }
+                      } yield
+                        ()
+                    case `2` | `3` ⇒ (()).pure[F]
+                  }
+                datatype ← Datatype[F]
+              } yield
+                Elem(name, offset, datatype)
             }
-            .sequence
           } yield
             Compound(
               datatypes
             )
+        }
+      }
+
+      sealed trait Reference extends Datatype
+      object Reference {
+        case object Object extends Reference
+        case object Region extends Reference
+
+        def apply[F[+_]: MonadErr](flags: BitSet)(implicit b: Buffer[F]): F[Reference] = {
+          import b._
+          flags.byte(0, 4) match {
+            case 0 ⇒ Object.pure[F]
+            case 1 ⇒ Region.pure[F]
+            case n ⇒ new IllegalArgumentException(s"Reference type: $n").raiseError[F, Reference]
+          }
+        }
+      }
+
+      case class Enumeration(elems: Vector[Enumeration.Elem]) extends Datatype
+      object Enumeration {
+        case class Elem(name: Str, value: Int)
+        def apply[F[+_]: MonadErr](flags: BitSet, version: Version)(implicit b: Buffer[F]): F[Enumeration] = {
+          import b._
+          import Version._
+          val num = flags.int(0, 16)
+          for {
+            base ← Datatype[F]
+            names ← takeN(num) {
+              implicit b ⇒ import b._
+              version match {
+                case `1` | `2` ⇒ b.ascii(padTo = 8)
+                case `3` ⇒ b.ascii
+              }
+            }
+            values ← takeN(num) { implicit b ⇒ ??? : F[Int] }
+            elems =
+              names.zip(values).map {
+                case (name, value) ⇒
+                  Elem(name, value)
+              }
+          } yield
+            Enumeration(elems)
         }
       }
     }
@@ -650,9 +684,6 @@ object Header {
         b.ascii.map(Comment(_))
     }
   }
-
-  def roundUp(n: Int, base: Int): Int =
-    n + (base - (n % base)) % base
 
   implicit class BitSetOps(val bitSet: BitSet) extends AnyVal {
     def byte(start: Int, end: Int): Byte =

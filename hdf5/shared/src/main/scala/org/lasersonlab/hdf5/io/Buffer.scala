@@ -11,8 +11,9 @@ import hammerlab.collection._
 import hammerlab.either._
 import hammerlab.option._
 import org.lasersonlab.files.Uri
-import org.lasersonlab.hdf5.io.Buffer.{ EOFException, MonadErr }
+import org.lasersonlab.hdf5.io.Buffer.{ EOFException, MonadErr, UnsupportedValue }
 import org.lasersonlab.hdf5.{ Addr, Length }
+import org.lasersonlab.math.utils.roundUp
 
 import scala.Array.fill
 import scala.collection.mutable
@@ -230,13 +231,187 @@ case class Buffer[F[+_]: MonadErr](fetch: Long ⇒ F[ByteBuffer]) {
           }
     }
 
+  private val ASCII = Charset.forName("ASCII")
+
   def ascii: F[String] =
     bytesUntilNull(Array.newBuilder[Byte])
       .map {
         bytes ⇒
-          val cs = Charset.forName("ASCII")
-          cs.decode(wrap(bytes)).toString
+          ASCII.decode(wrap(bytes)).toString
       }
+
+  def ascii(padTo: Int = 8): F[String] = {
+    for {
+      bytes ← bytesUntilNull(Array.newBuilder[Byte])
+      string = ASCII.decode(wrap(bytes)).toString
+      length = string.length
+      paddedLength = roundUp(length, padTo)
+      _ ←
+        if (paddedLength > length)
+          expect("null pad", 0 toByte, paddedLength - length)
+        else
+          (()).pure[F]
+    } yield
+      string
+  }
+  import F.rethrow
+
+  def offset(name: String): F[  Addr] = unsignedLong(name)
+  def length(name: String): F[Length] = unsignedLong(name)
+
+  def offset_?(name: String): F[?[Addr]] =
+    getLong.>>= {
+      long ⇒
+        if (long < 0)
+          err[Long, ?[Long]](name, long, 8)
+        else {
+          (
+            if (long == -1)
+              None
+            else
+              Some(long)
+          )
+          .pure[F]
+        }
+    }
+
+  def int(name: String, expected: Int) =
+    rethrow {
+      getInt[Exception | Unit] {
+        (position, int) ⇒
+          if (int != expected)
+            L(UnsupportedValue(name, int, position))
+          else
+            R(())
+      }
+    }
+
+  def expect(name: String, value: Byte): F[Unit] =
+    rethrow {
+      get {
+        (pos, byte) ⇒
+          if (byte != value)
+            L(UnsupportedValue(name, byte, pos))
+          else
+            R(())
+      }
+    }
+
+  def expect(name: String, expected: Array[Byte]): F[Unit] = {
+    val actual = fill(expected.length)(0 toByte)
+    rethrow {
+      get(actual, {
+        (pos, actual) ⇒
+          if (!actual.sameElements(expected))
+            L(UnsupportedValue(name, actual, pos))
+          else
+            R(())
+      })
+    }
+  }
+
+  def expect(name: String, value: Byte, num: Int): F[Unit] = {
+    if (num == 0) ().pure[F]
+    else
+      for {
+        _ ← expect(name, value)
+        rest ← expect(name, value, num - 1)
+      } yield
+        rest
+  }
+
+  def zero(name: String) = expect(name, 0 toByte)
+
+  def unsignedShort(): F[Int] =
+    getShort.map {
+      short ⇒
+        if (short < 0)
+          short.toInt + 0xffff
+        else
+          short
+    }
+
+  def byte(): F[Byte] = get
+
+  def err[V, T](name: String, value: V, offset: Int = 0): F[T] =
+    position.>>= {
+      pos ⇒
+        UnsupportedValue(name, value, pos - offset)
+          .raiseError[F, T]
+    }
+
+  def bool(name: String): F[Boolean] =
+    get.>>= {
+      case 0 ⇒ false.pure[F]
+      case 1 ⇒  true.pure[F]
+      case n ⇒ err(name, n, 1)
+    }
+
+  def unsignedByte(): F[Short] =
+    get.map {
+      byte ⇒
+        if (byte < 0)
+          (byte + 0xff).toShort
+        else
+          byte
+    }
+
+  def unsignedInt(): F[Long] =
+    getInt.map {
+      int ⇒
+        if (int < 0)
+          int + 0xffffffffL
+        else
+          int
+    }
+
+  def signedInt(name: String): F[Int] =
+    getInt >>= {
+      int ⇒
+        if (int < 0)
+          err(name, int, 4)
+        else
+          int.pure[F]
+    }
+
+  def unsignedLong(name: String): F[Long] =
+    for {
+      long ← getLong
+      res ←
+        if (long < 0)
+          err(name, long, 8)
+        else
+          long.pure[F]
+    } yield
+      res
+
+  def unsignedLongs(name: String, num: Int): F[Vector[Long]] = unsignedLongs(name, num, Vector())
+  private def unsignedLongs(name: String, num: Int, longs: Vector[Long]): F[Vector[Long]] =
+    if (num == 0)
+      longs.pure[F]
+    else
+      for {
+        long ← unsignedLong(name)
+        longs ← unsignedLongs(name, num - 1, longs :+ long)
+      } yield
+        longs
+
+  def unsignedLongs(name: String): F[Vector[Long]] = unsignedLongs(name, position)
+  def unsignedLongs(name: String, pos: F[Long], longs: Vector[Long] = Vector[Long]()): F[Vector[Long]] =
+    for {
+      long ← unsignedLong(name)
+      longs ←
+        if (long == 0)
+          longs.pure[F]
+        else
+          unsignedLongs(name, pos, longs :+ long)
+    } yield
+      longs
+
+  def undefined(name: String) = expect(name, 0xff toByte, 8)
+
+  def bytes(name: String, size: Int): F[Array[Byte]] =
+    get(fill(size)(0 toByte))
 }
 
 object Buffer {
@@ -264,167 +439,6 @@ object Buffer {
   type MonadErr[F[_]] = MonadError[F, Throwable]
   object MonadErr {
     def apply[F[_]](implicit F: MonadErr[F]) = F
-  }
-
-  case class syntax[F[+_]](buf: Buffer[F])(implicit F: MonadErr[F]) {
-    import F.rethrow
-
-    def offset(name: String): F[  Addr] = unsignedLong(name)
-    def length(name: String): F[Length] = unsignedLong(name)
-
-    def offset_?(name: String): F[?[Addr]] =
-      buf.getLong.>>= {
-        long ⇒
-          if (long < 0)
-            err[Long, ?[Long]](name, long, 8)
-          else {
-            (
-              if (long == -1)
-                None
-              else
-                Some(long)
-            )
-            .pure[F]
-          }
-      }
-
-    def int(name: String, expected: Int) =
-      rethrow {
-        buf.getInt[Exception | Unit] {
-          (position, int) ⇒
-            if (int != expected)
-              L(UnsupportedValue(name, int, position))
-            else
-              R(())
-        }
-      }
-
-    def expect(name: String, value: Byte): F[Unit] =
-      rethrow {
-        buf.get {
-          (pos, byte) ⇒
-            if (byte != value)
-              L(UnsupportedValue(name, byte, pos))
-            else
-              R(())
-        }
-      }
-
-    def expect(name: String, expected: Array[Byte]): F[Unit] = {
-      val actual = fill(expected.length)(0 toByte)
-      rethrow {
-        buf.get(actual, {
-          (pos, actual) ⇒
-            if (!actual.sameElements(expected))
-              L(UnsupportedValue(name, actual, pos))
-            else
-              R(())
-        })
-      }
-    }
-
-    def expect(name: String, value: Byte, num: Int): F[Unit] = {
-      if (num == 0) ().pure[F]
-      else
-        for {
-          _ ← expect(name, value)
-          rest ← expect(name, value, num - 1)
-        } yield
-          rest
-    }
-
-    def zero(name: String) = expect(name, 0 toByte)
-
-    def unsignedShort(): F[Int] =
-      buf.getShort.map {
-        short ⇒
-          if (short < 0)
-            short.toInt + 0xffff
-          else
-            short
-      }
-
-    def byte(): F[Byte] = buf.get
-
-    def err[V, T](name: String, value: V, offset: Int = 0): F[T] =
-      buf.position.>>= {
-        pos ⇒
-          UnsupportedValue(name, value, pos - offset)
-            .raiseError[F, T]
-      }
-
-    def bool(name: String): F[Boolean] =
-      buf.get.>>= {
-        case 0 ⇒ false.pure[F]
-        case 1 ⇒  true.pure[F]
-        case n ⇒ err(name, n, 1)
-      }
-
-    def unsignedByte(): F[Short] =
-      buf.get.map {
-        byte ⇒
-          if (byte < 0)
-            (byte + 0xff).toShort
-          else
-            byte
-      }
-
-    def unsignedInt(): F[Long] =
-      buf.getInt.map {
-        int ⇒
-          if (int < 0)
-            int + 0xffffffffL
-          else
-            int
-      }
-
-    def signedInt(name: String): F[Int] =
-      buf.getInt >>= {
-        int ⇒
-          if (int < 0)
-            err(name, int, 4)
-          else
-            int.pure[F]
-      }
-
-    def unsignedLong(name: String): F[Long] =
-      for {
-        long ← buf.getLong
-        res ←
-          if (long < 0)
-            err(name, long, 8)
-          else
-            long.pure[F]
-      } yield
-        res
-
-    def unsignedLongs(name: String, num: Int): F[Vector[Long]] = unsignedLongs(name, num, Vector())
-    private def unsignedLongs(name: String, num: Int, longs: Vector[Long]): F[Vector[Long]] =
-      if (num == 0)
-        longs.pure[F]
-      else
-        for {
-          long ← unsignedLong(name)
-          longs ← unsignedLongs(name, num - 1, longs :+ long)
-        } yield
-          longs
-
-    def unsignedLongs(name: String): F[Vector[Long]] = unsignedLongs(name, buf.position)
-    def unsignedLongs(name: String, pos: F[Long], longs: Vector[Long] = Vector[Long]()): F[Vector[Long]] =
-      for {
-        long ← unsignedLong(name)
-        longs ←
-          if (long == 0)
-            longs.pure[F]
-          else
-            unsignedLongs(name, pos, longs :+ long)
-      } yield
-        longs
-
-    def undefined(name: String) = expect(name, 0xff toByte, 8)
-
-    def bytes(name: String, size: Int): F[Array[Byte]] =
-      buf.get(fill(size)(0 toByte))
   }
 
   case class EOFException(start: Long, end: Long, pos: Long) extends Exception
