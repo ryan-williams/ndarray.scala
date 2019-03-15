@@ -4,27 +4,34 @@ import java.nio.ByteOrder
 import java.time.Instant
 import java.time.Instant.ofEpochSecond
 import java.nio.ByteOrder.{ BIG_ENDIAN, LITTLE_ENDIAN }
-import cats.implicits._
+
+import cats.implicits.{ catsStdInstancesForEither ⇒ _, catsStdInstancesForTry ⇒ _, _ }
 import hammerlab.option._
 import org.lasersonlab.hdf5.Addr
 import org.lasersonlab.hdf5.io.Buffer
 import org.lasersonlab.hdf5.io.Buffer.{ MonadErr, UnsupportedValue }
 import org.lasersonlab.hdf5.obj.Header.Msg.Datatype.FloatingPoint.MantissaNormalization
+import org.lasersonlab.hdf5.obj.Header.Msg.FillValue.{ AllocationTime, WriteTime }
 import org.lasersonlab.hdf5.obj.Header.V2.{ MaxAttrs, Times }
 import org.lasersonlab.math.utils.roundUp
 
 import scala.collection.immutable.BitSet
 import BitSet.fromBitMask
 
+sealed trait Header
 object Header {
+
   type Str = scala.Predef.String
   type Arr[T] = scala.Array[T]
   val Arr = scala.Array
+
+  def !![F[+_]: MonadErr, T](msg: Str): F[T] = new IllegalArgumentException(msg).raiseError[F, T]
 
   case class V1(
     refCount: Int,
     msgs: Vector[Msg]
   )
+  extends Header
   object V1 {
     def apply[F[+_]: MonadErr]()(implicit b: Buffer[F]): F[V1] = {
       import b._
@@ -34,9 +41,7 @@ object Header {
         numMsgs ← unsignedShort()
         refCount ← signedInt("refCount")
         size ← unsignedInt()
-        msgs ← b.takeBytes(size) {
-          implicit b ⇒ Msg[F]
-        }
+        msgs ← b.takeBytes(size) { implicit b ⇒ Msg[F] }
       } yield
         V1(
           refCount,
@@ -50,7 +55,7 @@ object Header {
     maxAttrs: ?[MaxAttrs],
     msgs: Vector[Msg]
   )
-
+  extends Header
   object V2 {
     def apply[F[+_]: MonadErr](implicit b: Buffer[F]): F[V2] = {
       import b._
@@ -92,7 +97,7 @@ object Header {
             None.pure[F]
         size ←
           flags & 0x3 match {
-            case 0 ⇒ unsignedByte().map { _.toLong }
+            case 0 ⇒ unsignedByte ().map { _.toLong }
             case 1 ⇒ unsignedShort().map { _.toLong }
             case 2 ⇒ unsignedInt()
             case 3 ⇒ unsignedLong("size")
@@ -123,7 +128,7 @@ object Header {
         V2(
           times,
           maxAttrs,
-          ???
+          msgs
         )
     }
 
@@ -157,8 +162,8 @@ object Header {
               case  1 ⇒ Dataspace[F]
               case  2 ⇒ LinkInfo[F]
               case  3 ⇒ Datatype[F]
-              case  4 ⇒ ??? // fill value (old)
-              case  5 ⇒ ??? // fill value
+              case  4 ⇒ FillValue.Old[F]
+              case  5 ⇒ FillValue[F]
               case  6 ⇒ ??? // link
               case  7 ⇒ ??? // external data files
               case  8 ⇒ ??? // data layout
@@ -186,6 +191,7 @@ object Header {
     }
 
     case object NIL extends Msg
+
     sealed trait Dataspace extends Msg
     object Dataspace {
       def apply[F[+_]: MonadErr](implicit b: Buffer[F]): F[Dataspace] = {
@@ -218,7 +224,7 @@ object Header {
             rank ← unsignedByte()
             flags ← byte()
             _ ← expect("reserved", 0, 5)
-            dimensions ← Dimensions[F](rank, flags)
+            dimensions ← Dimensions(rank, flags)
             _ ←
               if ((flags & 0x2) > 0)
                 b.position.>>= {
@@ -242,7 +248,7 @@ object Header {
             msg ←
               tpe match {
                 case 0 ⇒ Scalar.pure[F]
-                case 1 ⇒ Dimensions[F](rank, flags).map {Simple(_) }
+                case 1 ⇒ Dimensions(rank, flags).map {Simple(_) }
                 case 2 ⇒ Null.pure[F]
                 case n ⇒
                   b.position.>>= {
@@ -274,21 +280,13 @@ object Header {
             dimensions ←
               maxs match {
                 case None ⇒ sizes.map { Dimension(_, None) }.pure[F]
-                case Some(maxs) if sizes.length == maxs.length ⇒
+                case Some(maxs) ⇒
                   sizes
                     .zip(maxs)
                     .map {
                       case (size, max) ⇒ Dimension(size, Some(max))
                     }
                     .pure[F]
-                case Some(maxs) ⇒
-                  b.position.>>= {
-                    pos ⇒
-                      new IllegalStateException(
-                        s"${sizes.length} dimension sizes but ${maxs.length} maxs found (ending at pos $pos)"
-                      )
-                      .raiseError[F, Vector[Dimension]]
-                  }
               }
           } yield
             dimensions
@@ -347,7 +345,7 @@ object Header {
             case 1 ⇒ `1`.pure[F]
             case 2 ⇒ `2`.pure[F]
             case 3 ⇒ `3`.pure[F]
-            case n ⇒ new IllegalArgumentException(s"Invalid datatype version: $n").raiseError[F, Version]
+            case n ⇒ !!(s"Invalid datatype version: $n")
           }
         case object `1` extends Version
         case object `2` extends Version
@@ -359,22 +357,22 @@ object Header {
         for {
           bits ← byte()
           cls = bits & 0xf
-          version ← Version[F]((bits & 0xf0) >> 4)
+          version ← Version((bits & 0xf0) >> 4)
           flagBytes ← b.getLong(3)
           flags = fromBitMask(Arr(flagBytes))
           size ← signedInt("size")
           datatype ← cls match {
-            case  0 ⇒    FixedPoint[F](flags)
-            case  1 ⇒ FloatingPoint[F](flags)
-            case  2 ⇒          Time[F](flags)
-            case  3 ⇒        String[F](flags)
-            case  4 ⇒      Bitfield[F](flags)
-            case  5 ⇒        Opaque[F](flags)
-            case  6 ⇒      Compound[F](flags, version, size)
-            case  7 ⇒     Reference[F](flags)
-            case  8 ⇒   Enumeration[F](flags, version)
-            case  9 ⇒     VarLength[F](flags)
-            case 10 ⇒         Array[F](flags, version)
+            case  0 ⇒    FixedPoint(flags)
+            case  1 ⇒ FloatingPoint(flags)
+            case  2 ⇒          Time(flags)
+            case  3 ⇒        String(flags)
+            case  4 ⇒      Bitfield(flags)
+            case  5 ⇒        Opaque(flags)
+            case  6 ⇒      Compound(flags, version, size)
+            case  7 ⇒     Reference(flags)
+            case  8 ⇒   Enumeration(flags, version)
+            case  9 ⇒     VarLength(flags)
+            case 10 ⇒         Array(flags, version)
             case  n ⇒ err("datatype", n, rewind = 7)
           }
         } yield
@@ -432,7 +430,7 @@ object Header {
               case (false, false) ⇒    None.pure[F]
               case (false,  true) ⇒     Set.pure[F]
               case ( true, false) ⇒ Implied.pure[F]
-              case ( true,  true) ⇒ new IllegalArgumentException(s"Reserved mantissa-normalization bit flags: {$bit4, $bit5}").raiseError[F, MantissaNormalization]
+              case ( true,  true) ⇒ !!(s"Reserved mantissa-normalization bit flags: {$bit4, $bit5}")
             }
           case object    None extends MantissaNormalization
           case object     Set extends MantissaNormalization
@@ -450,7 +448,7 @@ object Header {
                 case ( true,  true) ⇒ err(s"VAX-endianness unsupported", flags)
               }
             signPos = flags.byte(0, 8)
-            mantissaNormalization ← MantissaNormalization[F](flags(5), flags(4))
+            mantissaNormalization ← MantissaNormalization(flags(5), flags(4))
             offset ← b.getShort
             precision ← b.getShort
             expLoc ← byte()
@@ -501,8 +499,8 @@ object Header {
         def apply[F[+_]: MonadErr](flags: BitSet)(implicit b: Buffer[F]): F[String] = {
           import b._
           for {
-                pad ←     Pad[F](flags.byte(0, 4))
-            charset ← Charset[F](flags.byte(4, 8))
+                pad ←     Pad(flags.byte(0, 4))
+            charset ← Charset(flags.byte(4, 8))
           } yield
             String(
               pad,
@@ -517,7 +515,7 @@ object Header {
               case 0 ⇒ NullTerminated.pure[F]
               case 1 ⇒     NullPadded.pure[F]
               case 2 ⇒    SpacePadded.pure[F]
-              case n ⇒ new IllegalArgumentException(s"Invalid string pad enum: $n").raiseError[F, Pad]
+              case n ⇒ !!(s"Invalid string pad enum: $n")
             }
           case object NullTerminated extends Pad
           case object     NullPadded extends Pad
@@ -529,7 +527,7 @@ object Header {
             flags match {
               case 0 ⇒ Ascii.pure[F]
               case 1 ⇒  Utf8.pure[F]
-              case n ⇒ new IllegalArgumentException(s"Invalid charset enum: $n").raiseError[F, Charset]
+              case n ⇒ !!(s"Invalid charset enum: $n")
             }
 
           case object  Utf8 extends Charset
@@ -702,8 +700,8 @@ object Header {
                 case 0 ⇒ Sequence(base).pure[F]
                 case 1 ⇒
                   for {
-                        pad ← String.    Pad[F](flags.byte(4,  8))
-                    charset ← String.Charset[F](flags.byte(8, 12))
+                        pad ← String.    Pad(flags.byte(4,  8))
+                    charset ← String.Charset(flags.byte(8, 12))
                   } yield
                     Strings(pad, charset, base)
                 case n ⇒ b.err(s"varlength type", n, rewind = 7)
@@ -751,6 +749,132 @@ object Header {
               } yield
                 Array(base, dimensions)
           }
+        }
+      }
+    }
+
+    case class FillValue(
+      allocationTime: AllocationTime,
+      writeTime: WriteTime,
+      value: ?[Arr[Byte]]
+    )
+    extends Msg
+    object FillValue {
+      sealed trait AllocationTime
+      object AllocationTime {
+        case object       Early extends AllocationTime
+        case object        Late extends AllocationTime
+        case object Incremental extends AllocationTime
+
+        def apply[F[+_]: MonadErr](n: Int): F[AllocationTime] =
+          n match {
+            case 1 ⇒       Early.pure[F]
+            case 2 ⇒        Late.pure[F]
+            case 3 ⇒ Incremental.pure[F]
+            case n ⇒ !!(s"Invalid fill-value version: $n")
+          }
+      }
+
+      sealed trait WriteTime
+      object WriteTime {
+        case object OnAllocation extends WriteTime
+        case object        Never extends WriteTime
+        case object     UserOnly extends WriteTime
+
+        def apply[F[+_]: MonadErr](n: Int): F[WriteTime] =
+          n match {
+            case 0 ⇒ OnAllocation.pure[F]
+            case 1 ⇒        Never.pure[F]
+            case 2 ⇒     UserOnly.pure[F]
+            case n ⇒ !!(s"Invalid fill-value version: $n")
+          }
+      }
+
+      sealed trait Version
+      object Version {
+        def apply[F[+_]: MonadErr](n: Int): F[Version] =
+          n match {
+            case 1 ⇒ `1`.pure[F]
+            case 2 ⇒ `2`.pure[F]
+            case 3 ⇒ `3`.pure[F]
+            case n ⇒ !!(s"Invalid fill-value version: $n")
+          }
+        case object `1` extends Version
+        case object `2` extends Version
+        case object `3` extends Version
+      }
+
+      def apply[F[+_]: MonadErr](implicit b: Buffer[F]): F[FillValue] = {
+        import b._
+        import Version._
+        for {
+          versionByte ← byte()
+          version ← Version(versionByte)
+          t ←
+            version match {
+              case `1` | `2` ⇒
+                for {
+                  allocationTime ← byte().>>= { AllocationTime[F](_) }
+                       writeTime ← byte().>>= {      WriteTime[F](_) }
+                  isDefined ← byte().>>= {
+                    case 0 ⇒ false.pure[F]
+                    case 1 ⇒  true.pure[F]
+                    case n ⇒ err("fill value defined", n, rewind = 1)
+                  }
+                } yield
+                  (allocationTime, writeTime, isDefined)
+              case `3` ⇒
+                for {
+                  flags ← byte()
+                  allocationTime ← AllocationTime(flags & 0x3)
+                       writeTime ← WriteTime(flags & 0xc)
+                       isDefined ←
+                        ((flags & 0x10) > 0, (flags & 0x10) > 0) match {
+                          case ( true, false) ⇒ false.pure[F]
+                          case (false,  true) ⇒  true.pure[F]
+                          case (bit4, bit5) ⇒ err("fill-value undefined and defined bits are equal", (bit4, bit5))
+                        }
+                } yield
+                  (allocationTime, writeTime, isDefined)
+            }
+          (allocationTime, writeTime, isDefined) = t
+          value ←
+            version match {
+              case `1` ⇒
+                for {
+                  size ← signedInt("fill value size")
+                  value ← bytes("fill value", size)
+                } yield
+                  isDefined ? value
+              case `2` | `3` ⇒
+                {
+                  isDefined ? {
+                    for {
+                      size ← signedInt("fill value size")
+                      value ← bytes("fill value", size)
+                    } yield
+                      value
+                  }
+                }
+                .sequence
+            }
+        } yield
+          FillValue(
+            allocationTime,
+            writeTime,
+            value
+          )
+      }
+
+      case class Old(value: Arr[Byte]) extends Msg
+      object Old {
+        def apply[F[+_]: MonadErr](implicit b: Buffer[F]): F[Old] = {
+          import b._
+          for {
+            size ← signedInt("size")
+            bytes ← bytes("bytes", size)
+          } yield
+            Old(bytes)
         }
       }
     }
