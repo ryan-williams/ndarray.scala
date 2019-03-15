@@ -162,8 +162,36 @@ case class Buffer[F[+_]: MonadErr](fetch: Long ⇒ F[ByteBuffer]) {
   def getInt  : F[  Int] = get(4, _.getInt)
   def getInt[T](fn: (Long, Int) ⇒ T): F[T] = position.map2(getInt) { fn }
 
+  def getInt(numBytes: Int, order: ByteOrder = LITTLE_ENDIAN): F[Int] =
+    if (numBytes <= 0 || numBytes > 4)
+      new IllegalArgumentException(s"").raiseError[F, Int]
+    else if (numBytes == 4)
+      getInt
+    else
+      get(
+        numBytes,
+        _.getInt,
+        fill[Byte](4)(0),
+        order,
+        4 - numBytes
+      )
+
   def getLong : F[ Long] = get(8, _.getLong)
   def getLong[T](fn: (Long, Long) ⇒ T) : F[T] = position.map2(getLong) { fn }
+
+  def getLong(numBytes: Int, order: ByteOrder = LITTLE_ENDIAN): F[Long] =
+    if (numBytes <= 0 || numBytes > 8)
+      new IllegalArgumentException(s"").raiseError[F, Long]
+    else if (numBytes == 8)
+      getLong
+    else
+      get(
+        numBytes,
+        _.getLong,
+        fill[Byte](8)(0),
+        order,
+        8 - numBytes
+      )
 
   def get(arr: Array[Byte], order: ByteOrder = LITTLE_ENDIAN): F[Array[Byte]] =
     get(
