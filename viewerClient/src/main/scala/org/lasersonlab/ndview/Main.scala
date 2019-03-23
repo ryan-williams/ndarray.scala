@@ -1,6 +1,7 @@
 package org.lasersonlab.ndview
 
 import cats.implicits._
+import diode.react.ReactConnector
 import io.circe.generic.auto._
 import japgolly.scalajs.react.extra.router._
 import japgolly.scalajs.react.vdom.Implicits._
@@ -62,7 +63,7 @@ object Main
       .map {
         model ⇒
 
-          val circuit = Circuit(model)
+          val circuit = new Circuit(model) with ReactConnector[Model]
           val connection = circuit.connect(m ⇒ m)
 
           val base = BaseUrl(window.location.href.takeWhile(_ != '#'))

@@ -1,4 +1,4 @@
-package org.lasersonlab.ndview.view
+package org.lasersonlab.ndview.model
 
 case class TreeState[T](
   value: Option[T] = None,

@@ -1,6 +1,6 @@
 package org.lasersonlab
 
-import org.lasersonlab.ndview.view.TreeState
+import org.lasersonlab.ndview.model.TreeState
 
 package object ndview {
   type Route   = Vector[String]

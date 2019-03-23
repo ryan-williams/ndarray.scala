@@ -9,7 +9,6 @@ import japgolly.scalajs.react.component.Scala
 import japgolly.scalajs.react.vdom.html_<^.<._
 import japgolly.scalajs.react.vdom.html_<^.^._
 import japgolly.scalajs.react.vdom.html_<^.{ VdomNode, _ }
-import lasersonlab.opt._
 
 object Json {
   object Null { def unapply(json: c.Json): Option[                    Unit    ] = json.asNull                   }

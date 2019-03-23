@@ -8,7 +8,7 @@ import utest._
 object HeaderTest
 extends lasersonlab.Suite
   with Assert.syntax {
-  import lasersonlab.threads.pool.`1`
+  override implicit val ec = lasersonlab.threads.pool.`1`
   val tests = Tests {
     'load - {
       val file = Local("/Users/ryan/c/hdf5-java-cloud/files/ica_bone_marrow_h5.h5")

@@ -1,10 +1,11 @@
 import hammerlab.{ math, types }
+import org.hammerlab.sbt.plugin.Deps.autoImport.configuration.testtest
 import org.scalajs.jsenv.nodejs.NodeJSEnv
 import scalajs._
 
 val        cdm  = "org.lasersonlab.thredds" ^ "cdm" ^ "5.0.0"
-val concurrent  = "org.lasersonlab" ^^     "concurrent" ^ "0.1.0"
-val      files  = "org.lasersonlab" ^^ "portable-files" ^ "0.1.0"
+val concurrent  = "org.lasersonlab" ^^     "concurrent" ^ "0.2.0".snapshot
+val      files  = "org.lasersonlab" ^^ "portable-files" ^ "0.2.0".snapshot
 val   `gcp-nio` = "org.lasersonlab" ^ "google-cloud-nio" ^ "0.55.2-alpha"
 
 default(
@@ -19,6 +20,7 @@ default(
     hammerlab.shapeless_utils → "1.5.1",
     hammerlab.             io → "5.2.1",
 
+    diode → "1.1.4",  // TODO: shouldn't be necessary; this should be the default version
     diode.react → "1.1.4.131",
     dom → "0.9.6"
   ),
@@ -220,11 +222,19 @@ lazy val viewerCommon =
   cross
     .settings(
       dep(
-        scalatags,
         circe,
         circe.generic,
-        circe.parser
-      )
+        circe.parser,
+
+        diode,
+        files +testtest,
+        scalatags,
+      ),
+      utest
+    )
+    .dependsOn(
+      gcp,
+      testing forTests
     )
 
 lazy val viewerClient =
@@ -250,6 +260,7 @@ lazy val viewerClient =
         react.extra,
 
         files,
+        hammerlab.bytes,
         hammerlab.types,
         scalajs.time,
         sttp,

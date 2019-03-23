@@ -9,17 +9,17 @@ import scala.concurrent.{ ExecutionContext, Future }
 import scala.reflect.ClassTag
 
 trait CanEq[L, R] {
-  type Diff
-  type Result = F[Option[Diff]]
-  def apply(l: L, r: R): F[?[Diff]]
+  type Δ
+  type Result = F[Option[Δ]]
+  def apply(l: L, r: R): F[?[Δ]]
 
   def map[L1, R1](
     implicit
     fl: L1 ⇒ L,
     fr: R1 ⇒ R
   ):
-      Aux[L1, R1, Diff] =
-    CanEq[L1, R1, Diff] {
+      Aux[L1, R1, Δ] =
+    CanEq[L1, R1, Δ] {
       (l, r) ⇒ this(fl(l), fr(r))
     }
   def map[T](
@@ -28,18 +28,18 @@ trait CanEq[L, R] {
     implicit
     ev: L =:= R
   ):
-      Aux[T, T, Diff] =
-    CanEq[T, T, Diff] {
+      Aux[T, T, Δ] =
+    CanEq[T, T, Δ] {
       (l, r) ⇒ this(f(l), f(r))
     }
 }
 
 trait Top {
-  type Aux[L, R, D] = CanEq[L, R] { type Diff = D }
+  type Aux[L, R, D] = CanEq[L, R] { type Δ = D }
 
   def apply[L, R, D](f: (L, R) ⇒ F[?[D]]): Aux[L, R, D] =
     new CanEq[L, R] {
-      type Diff = D
+      type Δ = D
       def apply(l: L, r: R): Result = f(l, r)
     }
 }
@@ -50,7 +50,7 @@ extends Top {
     implicit c: Cmp[Before],
     fn: After ⇒ Before,
   ):
-    Cmp.Aux[After, c.Diff] = c.map
+    Cmp.Aux[After, c.Δ] = c.map
 }
 
   trait FromHammerLab
@@ -63,7 +63,7 @@ extends WithConversion
   ):
     Aux[L, R, ce.Diff] =
     new CanEq[L, R] {
-      type Diff = ce.Diff
+      type Δ = ce.Diff
       def apply(l: L, r: R): Result = F { ce(l, r) }
     }
 }
@@ -78,7 +78,7 @@ extends FromHammerLab
   ):
     Cmp.Aux[T, ce.Diff] =
     new CanEq[T, T] {
-      type Diff = ce.Diff
+      type Δ = ce.Diff
       def apply(l: T, r: T): Result = F { ce(l, r) }
     }
 }
@@ -91,9 +91,9 @@ extends FromLasersonLab
     ce: CanEq[L, R],
     ec: ExecutionContext
   ):
-    Aux[F[L], R, ce.Diff] =
+    Aux[F[L], R, ce.Δ] =
     new CanEq[F[L], R] {
-      type Diff = ce.Diff
+      type Δ = ce.Δ
       def apply(l: F[L], r: R): Result =
         for {
           l ← l
@@ -111,9 +111,9 @@ extends FuturizeLeft
     ce: CanEq[L, R],
     ec: ExecutionContext
   ):
-    Aux[F[L], F[R], ce.Diff] =
+    Aux[F[L], F[R], ce.Δ] =
     new CanEq[F[L], F[R]] {
-      type Diff = ce.Diff
+      type Δ = ce.Δ
       def apply(l: F[L], r: F[R]): Result =
         for {
           l ← l
@@ -124,7 +124,7 @@ extends FuturizeLeft
     }
 
   trait syntax {
-    def cmp[L, R](l: L, r: R)(implicit c: CanEq[L, R]): Future[Option[c.Diff]] = c(l, r)
+    def cmp[L, R](l: L, r: R)(implicit c: CanEq[L, R]): Future[Option[c.Δ]] = c(l, r)
   }
 }
 

@@ -1,14 +1,12 @@
 package org.lasersonlab.ndview
 
 import diode._
-import diode.react.ReactConnector
+import org.lasersonlab.files._, http.Config.implicits._
 import org.lasersonlab.gcp.googleapis.{ Paged, storage }
 import org.lasersonlab.gcp.googleapis.projects.Project
 import org.lasersonlab.gcp.googleapis.storage.{ Bucket, Dir }
 import org.lasersonlab.gcp.oauth.Auth
-import org.lasersonlab.ndview.model.{ Login, Logins, Projects }
-import org.lasersonlab.files._
-import org.lasersonlab.files.http.Config.implicits._
+import org.lasersonlab.ndview.model._
 
 case class Model(
   logins: Logins = Logins(),
@@ -31,8 +29,8 @@ case class CloseDir(path: storage.Path) extends Action
 case object Clear extends Action
 
 case class Circuit(initialModel: Model)(implicit httpConfig: http.Config)
-  extends  diode.Circuit[Model]
-     with ReactConnector[Model] {
+  extends diode.Circuit[Model] {
+
   override protected def actionHandler: HandlerFunction =
     composeHandlers(
       modelHandler,
