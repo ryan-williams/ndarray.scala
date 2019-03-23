@@ -9,7 +9,7 @@ import hammerlab.indent.spaces2
 import hammerlab.option._
 import hammerlab.or._
 import lasersonlab.zarr.{ F, Path }
-import org.lasersonlab.test.future.{ CanEq, Cmp }
+import org.lasersonlab.cmp.{ CanEq, Cmp }
 import org.lasersonlab.files.Local
 import Ior.fromOptions
 import NonEmptyList.fromList

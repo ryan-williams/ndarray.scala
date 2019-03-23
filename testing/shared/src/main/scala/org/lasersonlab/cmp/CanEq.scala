@@ -1,12 +1,11 @@
-package org.lasersonlab.test.future
+package org.lasersonlab.cmp
 
 import cats.{ Applicative, Functor, Monad, MonadError }
 import cats.syntax.all._
 import hammerlab.option._
 import org.hammerlab.cmp
-import org.lasersonlab.test.future.CanEq.Aux
+import org.lasersonlab.cmp.CanEq.Aux
 
-import scala.concurrent.{ ExecutionContext, Future }
 import scala.reflect.ClassTag
 
 trait CanEq[F[_], L, R] {
@@ -60,7 +59,6 @@ extends WithConversion
   implicit def fromHammerLab[F[_]: Applicative, L, R](
     implicit
     ce: cmp.CanEq[L, R],
-    ec: ExecutionContext
   ):
     Aux[F, L, R, ce.Diff] =
     new CanEq[F, L, R] {
@@ -74,8 +72,7 @@ extends FromHammerLab
 {
   implicit def fromLasersonLab[F[_]: Applicative, T](
     implicit
-    ce: org.lasersonlab.test.Cmp[T],
-    ec: ExecutionContext
+    ce: magnolia.Cmp[T],
   ):
     Cmp.Aux[F, T, ce.Δ] =
     new CanEq[F, T, T] {
@@ -90,7 +87,6 @@ extends FromLasersonLab
   implicit def liftLeft[F[_]: Monad, L, R](
     implicit
     ce: CanEq[F, L, R],
-    ec: ExecutionContext
   ):
     Aux[F, F[L], R, ce.Δ] =
     new CanEq[F, F[L], R] {
@@ -110,7 +106,6 @@ extends FuturizeLeft
   implicit def liftBoth[F[_]: Monad, L, R](
     implicit
     ce: CanEq[F, L, R],
-    ec: ExecutionContext
   ):
     Aux[F, F[L], F[R], ce.Δ] =
     new CanEq[F, F[L], F[R]] {

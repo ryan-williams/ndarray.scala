@@ -3,7 +3,7 @@ package org.lasersonlab.hdf5.io
 import java.nio.ByteBuffer
 
 import cats.implicits._
-import org.lasersonlab.test.future.Assert
+import org.lasersonlab.cmp.Assert
 import utest._
 
 import scala.concurrent.Future

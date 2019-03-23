@@ -9,7 +9,7 @@ import org.lasersonlab.gcp.googleapis.projects.Project
 import org.lasersonlab.gcp.oauth.Auth.Valid
 import org.lasersonlab.gcp.oauth.{ Auth, ClientId, Params, RedirectUrl, Scope, Scopes }
 import org.lasersonlab.ndview.model.{ Login, Projects }
-import org.lasersonlab.test.future.Assert
+import org.lasersonlab.cmp.Assert
 import utest._
 
 object CircuitTest

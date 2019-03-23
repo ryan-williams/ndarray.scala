@@ -2,7 +2,7 @@ package org.lasersonlab.hdf5
 
 import org.lasersonlab.files.Local
 import org.lasersonlab.hdf5.Header.V0
-import org.lasersonlab.test.future.Assert
+import org.lasersonlab.cmp.Assert
 import utest._
 
 object HeaderTest

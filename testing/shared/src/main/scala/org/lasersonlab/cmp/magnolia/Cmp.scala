@@ -1,4 +1,4 @@
-package org.lasersonlab.test
+package org.lasersonlab.cmp.magnolia
 
 import cats.Eq
 import cats.data.{ Ior, NonEmptyList }

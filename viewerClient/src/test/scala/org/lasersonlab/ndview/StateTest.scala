@@ -12,7 +12,7 @@ import org.lasersonlab.gcp.googleapis._
 import org.lasersonlab.gcp.oauth.{ Auth, Params, RedirectUrl, Scopes, _ }
 import org.lasersonlab.ndview.model.{ Login, Logins, Projects }
 import org.lasersonlab.ndview.view.Page.pprint
-import org.lasersonlab.test.future.Assert
+import org.lasersonlab.cmp.Assert
 import utest._
 import org.lasersonlab.circe.SingletonCodec._
 import org.lasersonlab.files.Local

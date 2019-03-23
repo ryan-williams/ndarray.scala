@@ -1,6 +1,6 @@
 package org.lasersonlab.zarr.cmp
 
-import org.lasersonlab.test.Cmp
+import org.lasersonlab.cmp.magnolia.Cmp
 import org.lasersonlab.zarr.Dimension
 import org.lasersonlab.test.Cmp.by
 

@@ -4,7 +4,7 @@ import cats.Traverse
 import cats.implicits._
 import hammerlab.either._
 import hammerlab.option._
-import org.lasersonlab.test.Cmp
+import org.lasersonlab.cmp.magnolia.Cmp
 import org.lasersonlab.zarr.FillValue.NonNull
 import org.lasersonlab.zarr.array.{ metadata ⇒ md }
 import org.lasersonlab.zarr.dtype._

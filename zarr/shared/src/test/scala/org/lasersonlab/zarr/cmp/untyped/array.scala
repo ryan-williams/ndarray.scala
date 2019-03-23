@@ -3,7 +3,8 @@ package org.lasersonlab.zarr.cmp.untyped
 import cats.Traverse
 import cats.implicits._
 import hammerlab.either._
-import org.lasersonlab.test.Cmp
+import org.lasersonlab.cmp.magnolia
+import org.lasersonlab.cmp.magnolia.Cmp
 import org.lasersonlab.zarr.cmp.untyped.array.ElemsDiff.{ Index, Sizes }
 import org.lasersonlab.zarr.utils.Idx
 import org.lasersonlab.zarr.{ Array, Attrs, Dimension, Metadata }
@@ -86,7 +87,7 @@ object array {
       ]
     = {
       type Arr = Array.?[Shape, Idx]
-      Cmp {
+      magnolia.Cmp {
         (l, r) ⇒
           metadata.cmp.baseCmp[Shape, Idx]
             .apply(l.metadata, r.metadata)
