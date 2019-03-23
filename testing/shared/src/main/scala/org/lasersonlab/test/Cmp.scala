@@ -2,6 +2,7 @@ package org.lasersonlab.test
 
 import cats.Eq
 import cats.data.{ Ior, NonEmptyList }
+import hammerlab.option._
 import magnolia._
 
 import scala.language.experimental.macros
@@ -13,12 +14,12 @@ import scala.language.experimental.macros
  * - loses type-level `Diff`-type propagation: Magnolia derivation doesn't allow for supporting them
  */
 trait Cmp[T] {
-  type Diff
-  def apply(l: T, r: T): Option[Diff]
+  type Δ
+  def apply(l: T, r: T): ?[Δ]
 }
 
 object Cmp {
-  type Aux[T, D] = Cmp[T] { type Diff = D }
+  type Aux[T, D] = Cmp[T] { type Δ = D }
   type Typeclass[T] = Cmp[T]
 
   def by[L, R](fn: L ⇒ R)(implicit cmp: Cmp[R]): Cmp[L] = Cmp { (l, r) ⇒ cmp(fn(l), fn(r)) }
@@ -70,7 +71,7 @@ object Cmp {
 
   implicit def gen[T]: Cmp[T] = macro Magnolia.gen[T]
 
-  def apply[T, D](fn: (T, T) ⇒ Option[D]): Aux[T, D] = new Cmp[T] { type Diff = D; def apply(l: T, r: T): Option[D] = fn(l, r) }
+  def apply[T, D](fn: (T, T) ⇒ ?[D]): Aux[T, D] = new Cmp[T] { type Δ = D; def apply(l: T, r: T): ?[Δ] = fn(l, r) }
 
   implicit def fromEq[T](implicit e: Eq[T]): Cmp[T] =
     Cmp {
@@ -130,6 +131,6 @@ object Cmp {
 //  }
 
 //  trait ops {
-//    def cmp[T](l: T, r: T)(implicit cmp: Cmp[T]): Option[cmp.Diff] = cmp(l, r)
+//    def cmp[T](l: T, r: T)(implicit cmp: Cmp[T]): ?[cmp.Δ] = cmp(l, r)
 //  }
 }

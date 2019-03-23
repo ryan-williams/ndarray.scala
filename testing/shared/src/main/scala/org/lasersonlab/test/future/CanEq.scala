@@ -1,16 +1,17 @@
 package org.lasersonlab.test.future
 
+import cats.{ Applicative, Functor, Monad, MonadError }
+import cats.syntax.all._
 import hammerlab.option._
-import lasersonlab.future._
 import org.hammerlab.cmp
 import org.lasersonlab.test.future.CanEq.Aux
 
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.reflect.ClassTag
 
-trait CanEq[L, R] {
+trait CanEq[F[_], L, R] {
   type Δ
-  type Result = F[Option[Δ]]
+  type Result = F[?[Δ]]
   def apply(l: L, r: R): F[?[Δ]]
 
   def map[L1, R1](
@@ -18,8 +19,8 @@ trait CanEq[L, R] {
     fl: L1 ⇒ L,
     fr: R1 ⇒ R
   ):
-      Aux[L1, R1, Δ] =
-    CanEq[L1, R1, Δ] {
+      Aux[F, L1, R1, Δ] =
+    CanEq[F, L1, R1, Δ] {
       (l, r) ⇒ this(fl(l), fr(r))
     }
   def map[T](
@@ -28,17 +29,17 @@ trait CanEq[L, R] {
     implicit
     ev: L =:= R
   ):
-      Aux[T, T, Δ] =
-    CanEq[T, T, Δ] {
+      Aux[F, T, T, Δ] =
+    CanEq[F, T, T, Δ] {
       (l, r) ⇒ this(f(l), f(r))
     }
 }
 
 trait Top {
-  type Aux[L, R, D] = CanEq[L, R] { type Δ = D }
+  type Aux[F[_], L, R, D] = CanEq[F, L, R] { type Δ = D }
 
-  def apply[L, R, D](f: (L, R) ⇒ F[?[D]]): Aux[L, R, D] =
-    new CanEq[L, R] {
+  def apply[F[_], L, R, D](f: (L, R) ⇒ F[?[D]]): Aux[F, L, R, D] =
+    new CanEq[F, L, R] {
       type Δ = D
       def apply(l: L, r: R): Result = f(l, r)
     }
@@ -46,53 +47,53 @@ trait Top {
 
   trait WithConversion
 extends Top {
-  implicit def withConv[Before, After](
-    implicit c: Cmp[Before],
+  implicit def withConv[F[_], Before, After](
+    implicit c: Cmp[F, Before],
     fn: After ⇒ Before,
   ):
-    Cmp.Aux[After, c.Δ] = c.map
+    Cmp.Aux[F, After, c.Δ] = c.map
 }
 
   trait FromHammerLab
 extends WithConversion
 {
-  implicit def fromHammerLab[L, R](
+  implicit def fromHammerLab[F[_]: Applicative, L, R](
     implicit
     ce: cmp.CanEq[L, R],
     ec: ExecutionContext
   ):
-    Aux[L, R, ce.Diff] =
-    new CanEq[L, R] {
+    Aux[F, L, R, ce.Diff] =
+    new CanEq[F, L, R] {
       type Δ = ce.Diff
-      def apply(l: L, r: R): Result = F { ce(l, r) }
+      def apply(l: L, r: R): Result = ce(l, r).pure[F]
     }
 }
 
   trait FromLasersonLab
 extends FromHammerLab
 {
-  implicit def fromLasersonLab[T](
+  implicit def fromLasersonLab[F[_]: Applicative, T](
     implicit
     ce: org.lasersonlab.test.Cmp[T],
     ec: ExecutionContext
   ):
-    Cmp.Aux[T, ce.Diff] =
-    new CanEq[T, T] {
-      type Δ = ce.Diff
-      def apply(l: T, r: T): Result = F { ce(l, r) }
+    Cmp.Aux[F, T, ce.Δ] =
+    new CanEq[F, T, T] {
+      type Δ = ce.Δ
+      def apply(l: T, r: T): Result = ce(l, r).pure[F]
     }
 }
 
   trait FuturizeLeft
 extends FromLasersonLab
 {
-  implicit def futurizeLeft[L, R](
+  implicit def liftLeft[F[_]: Monad, L, R](
     implicit
-    ce: CanEq[L, R],
+    ce: CanEq[F, L, R],
     ec: ExecutionContext
   ):
-    Aux[F[L], R, ce.Δ] =
-    new CanEq[F[L], R] {
+    Aux[F, F[L], R, ce.Δ] =
+    new CanEq[F, F[L], R] {
       type Δ = ce.Δ
       def apply(l: F[L], r: R): Result =
         for {
@@ -106,13 +107,13 @@ extends FromLasersonLab
  object CanEq
 extends FuturizeLeft
 {
-  implicit def futurizeBoth[L, R](
+  implicit def liftBoth[F[_]: Monad, L, R](
     implicit
-    ce: CanEq[L, R],
+    ce: CanEq[F, L, R],
     ec: ExecutionContext
   ):
-    Aux[F[L], F[R], ce.Δ] =
-    new CanEq[F[L], F[R]] {
+    Aux[F, F[L], F[R], ce.Δ] =
+    new CanEq[F, F[L], F[R]] {
       type Δ = ce.Δ
       def apply(l: F[L], r: F[R]): Result =
         for {
@@ -124,11 +125,11 @@ extends FuturizeLeft
     }
 
   trait syntax {
-    def cmp[L, R](l: L, r: R)(implicit c: CanEq[L, R]): Future[Option[c.Δ]] = c(l, r)
+    def cmp[F[_], L, R](l: L, r: R)(implicit c: CanEq[F, L, R]): F[?[c.Δ]] = c(l, r)
   }
 }
 
-trait Assert[L, R] {
+trait Assert[F[_], L, R] {
   def apply(l: L, r: R): F[Unit]
 }
 object Assert
@@ -138,16 +139,40 @@ object Assert
       s"${l.runtimeClass.getSimpleName} vs ${r.runtimeClass.getSimpleName}: $diff"
     )
 
-  def f[L: ClassTag, R: ClassTag](l: L, r: R)(implicit c: CanEq[L, R], ec: ExecutionContext): F[Unit] =
-    c(l, r).map {
-      case Some(diff) ⇒ throw ComparisonFailure[L, R, Any](diff)
-      case None       ⇒ ()
-    }
+  def f[
+    F[_]:  Functor,
+    L   : ClassTag,
+    R   : ClassTag,
+  ](
+    l: L,
+    r: R
+  )(
+    implicit
+    c: CanEq[F, L, R]
+  ):
+    F[Unit] =
+    c(l, r)
+      .map {
+        case Some(diff) ⇒ throw ComparisonFailure[L, R, Any](diff)
+        case None       ⇒ ()
+      }
 
-  implicit def futureizeNeither[L: ClassTag, R: ClassTag](implicit c: CanEq[L, R], ec: ExecutionContext): Assert[L, R] = f(_, _)
+  implicit def liftNeither[
+    F[_]:  Functor,
+    L   : ClassTag,
+    R   : ClassTag,
+  ](
+    implicit
+    c: CanEq[F, L, R]
+  ):
+    Assert[F, L, R]
+  =
+    f(_, _)
+
+  type MonadErr[F[_]] = MonadError[F, Throwable]
 
   trait syntax {
-    def ==[L: ClassTag, R: ClassTag](l: L, r: R)(implicit a: Assert[L, R]): F[Unit] = a(l, r)
-    def !![Diff](diff: Diff): F[Unit] = Future.failed(ComparisonFailure(diff))
+    def ==[F[_], L: ClassTag, R: ClassTag](l: L, r: R)(implicit a: Assert[F, L, R]): F[Unit] = a(l, r)
+    def !![F[_]: MonadErr, Δ](Δ: Δ): F[Unit] = ComparisonFailure(Δ).raiseError[F, Unit]
   }
 }

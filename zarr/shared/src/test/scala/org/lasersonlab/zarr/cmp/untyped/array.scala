@@ -53,8 +53,8 @@ object array {
           val _metadata = the[Cmp[Metadata[Shape, Int, T]]]
 
           type Diff =
-            _metadata.Diff |
-               _attrs.Diff |
+            _metadata.Δ |
+               _attrs.Δ |
                  ElemsDiff
 
           _metadata(l.metadata, r.metadata)
