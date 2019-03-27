@@ -11,9 +11,9 @@ trait Assert[F[_], L, R] {
 
 object Assert
 {
-  case class ComparisonFailure[L, R, D](diff: D)(implicit l: ClassTag[L], r: ClassTag[R])
+  case class ComparisonFailure[F[_], L, R, D](diff: D)(implicit ce: CanEq[F, L, R], l: ClassTag[L], r: ClassTag[R])
     extends RuntimeException(
-      s"${l.runtimeClass.getSimpleName} vs ${r.runtimeClass.getSimpleName}: $diff"
+      s"$ce: ${l.runtimeClass.getSimpleName} vs ${r.runtimeClass.getSimpleName}: $diff"
     )
 
   def f[
@@ -30,7 +30,7 @@ object Assert
     F[Unit] =
     c(l, r)
       .map {
-        case Some(diff) ⇒ throw ComparisonFailure[L, R, Any](diff)
+        case Some(diff) ⇒ throw ComparisonFailure[F, L, R, Any](diff)
         case None       ⇒ ()
       }
 
@@ -50,6 +50,6 @@ object Assert
 
   trait syntax {
     def ==[F[_], L: ClassTag, R: ClassTag](l: L, r: R)(implicit a: Assert[F, L, R]): F[Unit] = a(l, r)
-    def !![F[_]: MonadErr, Δ](Δ: Δ): F[Unit] = ComparisonFailure(Δ).raiseError[F, Unit]
+    //def !![F[_]: MonadErr, L: ClassTag, R: ClassTag, Δ](Δ: Δ): F[Unit] = ComparisonFailure[F, L, R, Δ](Δ).raiseError[F, Unit]
   }
 }
