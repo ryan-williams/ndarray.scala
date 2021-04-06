@@ -103,6 +103,18 @@ lazy val `circe-utils` =
     )
 lazy val `circe-utils-x` = `circe-utils`.x
 
+lazy val cmp =
+  cross
+    .settings(
+      dep(
+        cats,
+        files,
+        hammerlab.test.suite compile,
+        magnolia,
+      )
+    )
+lazy val `cmp-x` = cmp.x
+
 lazy val convert =
   project
     .settings(
@@ -206,6 +218,9 @@ lazy val testing =
       ),
       utest
     )
+    .dependsOn(
+      cmp
+    )
 lazy val `testing-x` = testing.x
 
 lazy val utils = project.settings(
@@ -240,6 +255,8 @@ lazy val viewerCommon =
 lazy val viewerClient =
   project
     .settings(
+
+      scalac.xms(100 MB),
 
       // cf. https://github.com/scalacenter/scalajs-bundler/issues/278; TODO: move to JS plugin?
       version in startWebpackDevServer := "3.1.14",
@@ -360,6 +377,7 @@ lazy val all =
   root(
           `blosc-x` ,
     `circe-utils-x` ,
+            `cmp-x` ,
           `cloud-x` ,
          convert    ,
            `hdf5-x` ,

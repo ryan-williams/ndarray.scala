@@ -8,14 +8,10 @@ import hammerlab.lines._
 import hammerlab.indent.spaces2
 import hammerlab.option._
 import hammerlab.or._
-import lasersonlab.zarr.{ F, Path }
+import lasersonlab.zarr.{ Path }
 import org.lasersonlab.cmp.{ CanEq, Cmp }
 import org.lasersonlab.files.Local
-import Ior.fromOptions
 import NonEmptyList.fromList
-
-import scala.concurrent.{ ExecutionContext, Future }
-import scala.util.{ Failure, Success, Try }
 
 object path
   extends CanEq.syntax {
@@ -97,7 +93,7 @@ object path
     }
   }
 
-  def children(path: Path)(implicit ec: ExecutionContext): F[Map[URI, Path]] =
+  def children[F[_]](path: Path): F[Map[URI, Path]] =
     path
       .list
       .map {
@@ -119,14 +115,13 @@ object path
 trait path {
   import path.{ Diff ⇒ _, _ }
 
-  implicit def localCmp(implicit ec: ExecutionContext, str: Cmp[String]): Cmp.Aux[Local, path.Diff[Lines]] = pathCmp.map(l ⇒ l, r ⇒ r)
-  implicit def pathCmp(
+  implicit def localCmp[F[_]](implicit str: Cmp[F, String]): Cmp.Aux[F, Local, path.Diff[Lines]] = pathCmp.map(l ⇒ l, r ⇒ r)
+  implicit def pathCmp[F[_]](
     implicit
-    ec: ExecutionContext,
-    str: Cmp[String]
+    str: Cmp[F, String]
   ):
-    Cmp.Aux[Path, path.Diff[Lines]] =
-    new CanEq[Path, Path] {
+    Cmp.Aux[F, Path, path.Diff[Lines]] =
+    new CanEq[F, Path, Path] {
       type FileDiff = Lines
       type LocalDiff = path.LocalDiff[FileDiff]
       type DirDiff = path.DirDiff[FileDiff]

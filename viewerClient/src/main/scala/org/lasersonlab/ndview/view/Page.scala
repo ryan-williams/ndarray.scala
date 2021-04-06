@@ -250,7 +250,7 @@ extends SignIn.syntax
           import _props._
           val Props(Model(Logins(logins, _), _, _)) = props
           val now = Instant.now()
-          val bufferMS = 5000
+          val loginExpiryBufferMS = 5000
           logins
             .map {
               login ⇒
@@ -261,7 +261,7 @@ extends SignIn.syntax
                       now,
                       login.expires
                     ) -
-                    bufferMS
+                    loginExpiryBufferMS
 
                 if (ttl <= 0) {
                   println(s"Login ${login.email} is ${-ttl}ms past its expiration")

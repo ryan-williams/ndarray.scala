@@ -118,15 +118,15 @@ object GroupTest
       else {
         val actual = tmpPath()
 
-        for {
-          _ ← group.save(actual)
-          _ ← ==(actual, `grouptest.zarr`)
-          group2 ← actual.load[Foo]
-          _ ← ==(group, group2)
-          expected ← `grouptest.zarr`.load[Foo]
-          _ ← ==(group, expected)
-        } yield
-          ()
+//        for {
+//          _ ← group.save(actual)
+//          _ ← ==(actual, `grouptest.zarr`)
+//          group2 ← actual.load[Foo]
+//          _ ← ==(group, group2)
+//          expected ← `grouptest.zarr`.load[Foo]
+//          _ ← ==(group, expected)
+//        } yield
+//          ()
       }
     }
 
@@ -186,20 +186,20 @@ object GroupTest
               )
           )
 
-        if (writeNewExpectedData)
-          group.save(`mixed.zarr`)
-        else {
-          val actual = tmpPath()
-          for {
-            _ ← group.save(actual)
-            _ ← ==(actual, `mixed.zarr`)
-            group2 ← actual.load[Foo]
-            _ ← ==(group, group2)
-            expected ← `mixed.zarr`.load[Foo]
-            _ ← ==(group, expected)
-          } yield
-            ()
-        }
+//        if (writeNewExpectedData)
+//          group.save(`mixed.zarr`)
+//        else {
+//          val actual = tmpPath()
+//          for {
+//            _ ← group.save(actual)
+//            _ ← ==(actual, `mixed.zarr`)
+//            group2 ← actual.load[Foo]
+//            _ ← ==(group, group2)
+//            expected ← `mixed.zarr`.load[Foo]
+//            _ ← ==(group, expected)
+//          } yield
+//            ()
+//        }
       }
     }
 
@@ -275,14 +275,14 @@ object GroupTest
       if (!writeNewExpectedData) {
         val actual = tmpPath()
 
-        for {
-          _ ← group.save(actual)
-          group2 ← actual.load[Group[Int]]
-          _ ← ==(group, group2)
-          expected ← `grouptest.zarr`.load[Group[Int]]
-          _ ← ==(group, expected)
-        } yield
-          ()
+//        for {
+//          _ ← group.save(actual)
+//          group2 ← actual.load[Group[Int]]
+//          _ ← ==(group, group2)
+//          expected ← `grouptest.zarr`.load[Group[Int]]
+//          _ ← ==(group, expected)
+//        } yield
+//          ()
       }
     }
   }

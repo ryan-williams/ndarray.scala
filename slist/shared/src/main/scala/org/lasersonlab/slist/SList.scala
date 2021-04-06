@@ -1,7 +1,7 @@
 package org.lasersonlab.slist
 
 import cats.implicits._
-import cats.{ Applicative, Eval, Reducible, Traverse }
+import cats.{ Applicative, Eval, Foldable, Reducible, Traverse }
 import hammerlab.either._
 import org.lasersonlab.slist.SList.FromList.{ Err, TooFew, TooMany }
 import org.lasersonlab.slist.Scannable.syntax._
@@ -16,6 +16,8 @@ trait SList {
   type Tail[_]
   def tail: Tail[Head]
   def size: Int
+
+  override def toString: String = s"$head :: $tail"
 }
 
 object SList {
@@ -48,8 +50,9 @@ object SList {
    * Base/Empty object; not technically an [[SList]], but behaves syntactically like one
    */
   case object `0` {
-    def ::[T](h: T) = `1`(h)
+    def ::[T](h: T) = `1`(h, this)
     def size = 0
+    override def toString: String = "⟘"
   }
   val   ⊥     = `0`
   type  ⊥     = `0`.type
@@ -77,7 +80,7 @@ object SList {
   //
   // TODO: give them nice toStrings / Shows
 
-  case class `1`[T](head: T              ) extends SList { type Head = T; type Tail[U] = `0`[U]; def size = 1 ; def tail: `0`[T] = ⊥ }
+  case class `1`[T](head: T, tail: `0`[T]) extends SList { type Head = T; type Tail[U] = `0`[U]; def size = 1 }
   case class `2`[T](head: T, tail: `1`[T]) extends SList { type Head = T; type Tail[U] = `1`[U]; def size = 2 }
   case class `3`[T](head: T, tail: `2`[T]) extends SList { type Head = T; type Tail[U] = `2`[U]; def size = 3 }
   case class `4`[T](head: T, tail: `3`[T]) extends SList { type Head = T; type Tail[U] = `3`[U]; def size = 4 }
@@ -95,19 +98,20 @@ object SList {
     def apply[T](h: T, t: In[T]): Out[T]
   }
   object Cons {
+    type Ax[O[_], In[_]] = Cons[In] { type Out[T] = O[T] }
     abstract class Aux[In[_], O[U] <: SList.Aux[U, In]]
       extends Cons[In] {
       type Out[U] = O[U]
     }
-    implicit val cons_0 = new Aux[`0`, `1`] { def apply[T](h: T, t: `0`[T]) = `1`(h   ) }
-    implicit val cons_1 = new Aux[`1`, `2`] { def apply[T](h: T, t: `1`[T]) = `2`(h, t) }
-    implicit val cons_2 = new Aux[`2`, `3`] { def apply[T](h: T, t: `2`[T]) = `3`(h, t) }
-    implicit val cons_3 = new Aux[`3`, `4`] { def apply[T](h: T, t: `3`[T]) = `4`(h, t) }
-    implicit val cons_4 = new Aux[`4`, `5`] { def apply[T](h: T, t: `4`[T]) = `5`(h, t) }
-    implicit val cons_5 = new Aux[`5`, `6`] { def apply[T](h: T, t: `5`[T]) = `6`(h, t) }
-    implicit val cons_6 = new Aux[`6`, `7`] { def apply[T](h: T, t: `6`[T]) = `7`(h, t) }
-    implicit val cons_7 = new Aux[`7`, `8`] { def apply[T](h: T, t: `7`[T]) = `8`(h, t) }
-    implicit val cons_8 = new Aux[`8`, `9`] { def apply[T](h: T, t: `8`[T]) = `9`(h, t) }
+    implicit val cons_0: Ax[`1`, `0`] = new Aux[`0`, `1`] { def apply[T](h: T, t: `0`[T]) = `1`(h, t) }
+    implicit val cons_1: Ax[`2`, `1`] = new Aux[`1`, `2`] { def apply[T](h: T, t: `1`[T]) = `2`(h, t) }
+    implicit val cons_2: Ax[`3`, `2`] = new Aux[`2`, `3`] { def apply[T](h: T, t: `2`[T]) = `3`(h, t) }
+    implicit val cons_3: Ax[`4`, `3`] = new Aux[`3`, `4`] { def apply[T](h: T, t: `3`[T]) = `4`(h, t) }
+    implicit val cons_4: Ax[`5`, `4`] = new Aux[`4`, `5`] { def apply[T](h: T, t: `4`[T]) = `5`(h, t) }
+    implicit val cons_5: Ax[`6`, `5`] = new Aux[`5`, `6`] { def apply[T](h: T, t: `5`[T]) = `6`(h, t) }
+    implicit val cons_6: Ax[`7`, `6`] = new Aux[`6`, `7`] { def apply[T](h: T, t: `6`[T]) = `7`(h, t) }
+    implicit val cons_7: Ax[`8`, `7`] = new Aux[`7`, `8`] { def apply[T](h: T, t: `7`[T]) = `8`(h, t) }
+    implicit val cons_8: Ax[`9`, `8`] = new Aux[`8`, `9`] { def apply[T](h: T, t: `8`[T]) = `9`(h, t) }
   }
 
   implicit class Ops[T, Tail[_]](val tail: Tail[T]) extends AnyVal {
@@ -189,7 +193,7 @@ object SList {
     implicit val utils_8 = cons[`7`]
     implicit val utils_9 = cons[`8`]
 
-    def cons[Tail[_]](
+    implicit def cons[Tail[_]](
       implicit
       tail: Base[Tail],
         ev: Cons[Tail]

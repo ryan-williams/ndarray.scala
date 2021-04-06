@@ -46,12 +46,10 @@ trait AfterAlls
 trait Hooks
   extends TestSuite
      with FuturizeHook
-     with Befores
-     with Afters
-     with BeforeAlls
-     with AfterAlls
+     with Befores with BeforeAlls
+     with  Afters with  AfterAlls
 {
-self: TestSuite ⇒
+  self: TestSuite ⇒
   override def utestWrap(
     path: Seq[String],
     runBody: ⇒ concurrent.Future[Any]

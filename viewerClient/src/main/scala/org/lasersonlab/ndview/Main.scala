@@ -2,10 +2,10 @@ package org.lasersonlab.ndview
 
 import cats.implicits._
 import diode.react.ReactConnector
-import io.circe.generic.auto._
+import japgolly.scalajs.react.component.Scala
+import japgolly.scalajs.react.extra.OnUnmount
 import japgolly.scalajs.react.extra.router._
 import japgolly.scalajs.react.vdom.Implicits._
-import lasersonlab.circe._
 import lasersonlab.future._
 import org.lasersonlab.gcp.SignIn
 import org.lasersonlab.gcp.oauth._
@@ -36,7 +36,10 @@ object Main
   def main() = {
     println("client main")
 
-    val model = LocalStorage(Model())
+    val model = {
+      import io.circe.generic.auto._
+      LocalStorage(Model())
+    }
 
     // If this is an OAuth redirect:
     //
@@ -103,9 +106,11 @@ object Main
             .notFound(redirectToPage(Vector())(Redirect.Replace))
           }
 
-          val router = Router(base, routerConfig.logToConsole)
+          val router: Router[Vector[String]] = Router(base, routerConfig.logToConsole)
 
-          router()
+//          (router: Scala.Unmounted[Unit, Resolution[Vector[String]], OnUnmount.Backend])
+          //router: Nullary[Vector[String]]
+          router.apply()
             .renderIntoDOM(
               document.getElementById("root")
             )

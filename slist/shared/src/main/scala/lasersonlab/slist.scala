@@ -15,6 +15,8 @@ trait slist
   val `0` = s.`0`
   val  ⊥  = s.`0`
   type ⊥  = `0`.type
+  val  ⟘  = s.`0`
+  type ⟘  = `0`.type
 
   type `0`[T] = s.`0`[T]
   type `1`[T] = s.`1`[T]
